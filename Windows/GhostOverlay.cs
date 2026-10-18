@@ -30,7 +30,7 @@ public sealed class GhostOverlay
             return;
         }
 
-        if (this.gameGui.WorldToScreen(this.ghost.Position + new Vector3(0f, 2.2f, 0f), out var label))
+        if (this.gameGui.WorldToScreen(this.ghost.DisplayPosition + new Vector3(0f, 2.2f, 0f), out var label))
         {
             var text = $"被弾: {this.judge.LastHitName}";
             var size = ImGui.CalcTextSize(text);

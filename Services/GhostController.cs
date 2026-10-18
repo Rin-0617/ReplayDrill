@@ -22,6 +22,10 @@ public sealed unsafe class GhostController : IDisposable
     /// <summary>スティックの遊び。これより小さい傾きは無視する。</summary>
     private const float StickDeadzone = 0.15f;
 
+    // ジャンプ。高さ約1.4ヤルム、滞空約0.75秒になる初速と重力。
+    private const float JumpVelocity = 7.5f;
+    private const float Gravity = 20f;
+
     private readonly Configuration configuration;
     private readonly IFramework framework;
     private readonly ICondition condition;
@@ -33,6 +37,11 @@ public sealed unsafe class GhostController : IDisposable
 
     /// <summary>位置を差し替えている登場人物のアドレス。0 なら差し替えない。</summary>
     private nint pinnedAddress;
+
+    /// <summary>ジャンプ中の床からの高さと、上向きの速度。</summary>
+    private float jumpHeight;
+    private float verticalVelocity;
+    private bool jumpWasDown;
 
     public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IGamepadState gamepad, IObjectTable objectTable, IGameInteropProvider interop, IPluginLog log)
     {
@@ -61,7 +70,11 @@ public sealed unsafe class GhostController : IDisposable
     /// <summary>練習中か（分身を出しているか）。</summary>
     public bool Active { get; private set; }
 
+    /// <summary>足元の位置（床の上）。AoE の判定はこの位置で行う。</summary>
     public Vector3 Position { get; private set; }
+
+    /// <summary>ジャンプの高さを足した、キャラを表示する位置。</summary>
+    public Vector3 DisplayPosition => this.Position + new Vector3(0f, this.jumpHeight, 0f);
 
     /// <summary>分身の向き（最後に動いた方向、ゲームの Rotation と同じ表し方）。</summary>
     public float Rotation { get; private set; }
@@ -101,6 +114,8 @@ public sealed unsafe class GhostController : IDisposable
         this.AnchorId = anchor.GameObjectId;
         this.Position = anchor.Position;
         this.Rotation = anchor.Rotation;
+        this.jumpHeight = 0f;
+        this.verticalVelocity = 0f;
         this.Active = true;
     }
 
@@ -132,7 +147,7 @@ public sealed unsafe class GhostController : IDisposable
         }
 
         this.Move(framework);
-
+        this.UpdateJump(framework);
         this.PinAnchor();
     }
 
@@ -192,6 +207,37 @@ public sealed unsafe class GhostController : IDisposable
         this.Rotation = MathF.Atan2(direction.X, direction.Y);
     }
 
+    /// <summary>ジャンプのキー（パッドは下ボタン）で跳び、放物線を描いて床に戻る。AoE の判定には影響しない。</summary>
+    private void UpdateJump(IFramework framework)
+    {
+        var canInput = !ImGui.GetIO().WantTextInput && IsGameFocused();
+        var jumpDown = canInput && (MoveBindings.IsDown(MoveAction.Jump) || this.gamepad.Raw(Dalamud.Game.ClientState.GamePad.GamepadButtons.South) > 0f);
+        var pressed = jumpDown && !this.jumpWasDown;
+        this.jumpWasDown = jumpDown;
+
+        var airborne = this.jumpHeight > 0f || this.verticalVelocity > 0f;
+        if (pressed && !airborne)
+        {
+            this.verticalVelocity = JumpVelocity;
+            airborne = true;
+        }
+
+        if (!airborne)
+        {
+            return;
+        }
+
+        var scale = this.configuration.ScaleWithPlaybackSpeed && !this.IsPaused ? this.PlaybackSpeed : 1f;
+        var dt = (float)framework.UpdateDelta.TotalSeconds * scale;
+        this.jumpHeight += this.verticalVelocity * dt;
+        this.verticalVelocity -= Gravity * dt;
+        if (this.jumpHeight <= 0f)
+        {
+            this.jumpHeight = 0f;
+            this.verticalVelocity = 0f;
+        }
+    }
+
     /// <summary>
     /// 出発点にした登場人物を、分身の位置へ置き直す。リプレイの再生は
     /// オフラインなので、書き換えても他人には影響しない。リプレイ側がこの人物の位置を
@@ -208,7 +254,8 @@ public sealed unsafe class GhostController : IDisposable
 
         this.pinnedAddress = anchor.Address;
         var native = (ClientGameObject*)anchor.Address;
-        native->SetPosition(this.Position.X, this.Position.Y, this.Position.Z);
+        var display = this.DisplayPosition;
+        native->SetPosition(display.X, display.Y, display.Z);
         native->SetRotation(this.Rotation);
     }
 
@@ -216,7 +263,8 @@ public sealed unsafe class GhostController : IDisposable
     {
         if (this.pinnedAddress != 0 && (nint)thisPtr == this.pinnedAddress)
         {
-            (x, y, z) = (this.Position.X, this.Position.Y, this.Position.Z);
+            var display = this.DisplayPosition;
+            (x, y, z) = (display.X, display.Y, display.Z);
         }
 
         this.setPositionHook!.Original(thisPtr, x, y, z);

@@ -11,10 +11,11 @@ public enum MoveAction
     Back,
     Left,
     Right,
+    Jump,
 }
 
 /// <summary>
-/// ゲームのキー設定（キーボード）から、前後左右の移動に割り当てたキーを読む。
+/// ゲームのキー設定（キーボード）から、前後左右の移動とジャンプに割り当てたキーを読む。
 /// ゲーム側の入力判定は使わない。練習中は移動キーをゲームに渡さないので、そちらは常に「押していない」になる。
 /// </summary>
 public static unsafe class MoveBindings
@@ -27,6 +28,7 @@ public static unsafe class MoveBindings
         // 「旋回」と「横移動」のどちらに割り当てていても、カメラ基準の横移動として扱う。
         [MoveAction.Left] = [InputId.MOVE_LEFT, InputId.MOVE_STRIFE_L],
         [MoveAction.Right] = [InputId.MOVE_RIGHT, InputId.MOVE_STRIFE_R],
+        [MoveAction.Jump] = [InputId.JUMP],
     };
 
     /// <summary>キー設定を読めないときの割り当て。</summary>
@@ -36,6 +38,7 @@ public static unsafe class MoveBindings
         [MoveAction.Back] = VirtualKey.S,
         [MoveAction.Left] = VirtualKey.A,
         [MoveAction.Right] = VirtualKey.D,
+        [MoveAction.Jump] = VirtualKey.SPACE,
     };
 
     /// <summary>その移動に割り当てたキーのどれかが（修飾キーも含めて）押されているか。</summary>
@@ -137,7 +140,8 @@ public static unsafe class MoveBindings
         MoveAction.Forward => "前",
         MoveAction.Back => "後",
         MoveAction.Left => "左",
-        _ => "右",
+        MoveAction.Right => "右",
+        _ => "跳",
     };
 
     private static bool IsKeyDown(int key) => (GetAsyncKeyState(key) & 0x8000) != 0;
