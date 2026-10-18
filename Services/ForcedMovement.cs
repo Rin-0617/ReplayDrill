@@ -23,9 +23,11 @@ public enum MarchDirection
 public sealed partial class ForcedMovement : IDisposable
 {
     // ActionEffect の効果の種類。値（Value）がそれぞれ Knockback / Attract シートの行番号。
-    public const byte EffectKnockback = 32;
-    public const byte EffectAttract1 = 33;
-    public const byte EffectAttract2 = 34;
+    // 7.x ではノックバックが 31（つぎつぎトラップのログで Knockback 240 行目を確認）。
+    // 引き寄せは同じく1つずれた 32・33 とみなしている。
+    public const byte EffectKnockback = 31;
+    public const byte EffectAttract1 = 32;
+    public const byte EffectAttract2 = 33;
 
     private const float DefaultSpeed = 20f;
 
@@ -70,7 +72,7 @@ public sealed partial class ForcedMovement : IDisposable
             4 => FromAngle(sourceRotation - (MathF.PI / 2f)),
             5 => FromAngle(sourceRotation + (MathF.PI / 2f)),
 
-            // 0: 発生源から遠ざかる向き。2（ランダム）なども、これで代用する。
+            // 0: 発生源から遠ざかる向き。6（対象者を中心に外へ）や 2（ランダム）なども、これで代用する。
             _ => away.LengthSquared() > 1e-6f ? Vector2.Normalize(away) : FromAngle(sourceRotation),
         };
 

@@ -124,6 +124,7 @@ public sealed unsafe class HitJudge : IDisposable
                 var caster = (ClientGameObject*)casterPtr;
                 var targets = new List<ulong>(header->NumTargets);
                 var displacements = new List<Displacement>();
+                var summary = new System.Text.StringBuilder();
                 for (var i = 0; targetEntityIds != null && i < header->NumTargets; i++)
                 {
                     targets.Add(targetEntityIds[i].ObjectId);
@@ -134,6 +135,12 @@ public sealed unsafe class HitJudge : IDisposable
 
                     foreach (var e in effects[i].Effects)
                     {
+                        // 効果の種類を調べるためのログ用（0=なし、3=ダメージ は省く）。
+                        if (e.Type is not (0 or 3))
+                        {
+                            summary.Append($" {targetEntityIds[i].ObjectId:X}:{e.Type}/{e.Value}/{e.Param0},{e.Param1},{e.Param2},{e.Param3},{e.Param4}");
+                        }
+
                         if (e.Type is ForcedMovement.EffectKnockback or ForcedMovement.EffectAttract1 or ForcedMovement.EffectAttract2)
                         {
                             displacements.Add(new Displacement(targetEntityIds[i].ObjectId, e.Type, e.Value));
@@ -159,6 +166,8 @@ public sealed unsafe class HitJudge : IDisposable
                 {
                     this.pending.Add(effect);
                 }
+
+                this.log.Debug($"[ReplayDrill] Effect {header->ActionId} from {caster->NameString} main={header->AnimationTargetId.ObjectId:X} targets={header->NumTargets} anchor={this.ghost.AnchorEntityId:X}{summary}");
             }
         }
         catch
