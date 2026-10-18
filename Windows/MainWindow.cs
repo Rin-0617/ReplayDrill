@@ -240,7 +240,7 @@ public sealed class MainWindow : Window
         uint? remove = null;
         foreach (var (actionId, learned) in this.configuration.LearnedKnockbacks.OrderBy(p => p.Value.Name))
         {
-            ImGui.TextUnformatted($"{learned.Name}  外向きに {learned.Distance:0.#}ヤルム");
+            ImGui.TextUnformatted($"{learned.Name}  外向きに {learned.Distance:0.#}ヤルム（混沌の風などのデバフで増減）");
             ImGui.SameLine();
             if (ImGui.SmallButton($"消す##learned{actionId}"))
             {

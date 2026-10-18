@@ -26,6 +26,7 @@ public sealed class MechanicObserver : IDisposable
     private const float MaxDistanceSpread = 3f;
 
     private readonly GhostController ghost;
+    private readonly ForcedMovement forced;
     private readonly Configuration configuration;
     private readonly IObjectTable objectTable;
     private readonly IFramework framework;
@@ -33,9 +34,10 @@ public sealed class MechanicObserver : IDisposable
     private readonly Dictionary<uint, HashSet<uint>> statuses = [];
     private readonly List<Snapshot> snapshots = [];
 
-    public MechanicObserver(GhostController ghost, Configuration configuration, IObjectTable objectTable, IFramework framework, IPluginLog log)
+    public MechanicObserver(GhostController ghost, ForcedMovement forced, Configuration configuration, IObjectTable objectTable, IFramework framework, IPluginLog log)
     {
         this.ghost = ghost;
+        this.forced = forced;
         this.configuration = configuration;
         this.objectTable = objectTable;
         this.framework = framework;
@@ -53,7 +55,8 @@ public sealed class MechanicObserver : IDisposable
     {
         var players = this.objectTable.PlayerObjects
             .Where(p => p.EntityId != this.ghost.AnchorEntityId && targets.Contains((ulong)p.EntityId))
-            .Select(p => new Observed(p.EntityId, p.Name.TextValue, p.Position, p.Rotation))
+            .OfType<IBattleChara>()
+            .Select(p => new Observed(p.EntityId, p.Name.TextValue, p.Position, p.Rotation, [.. p.StatusList.Select(s => s.StatusId)]))
             .ToList();
         if (players.Count > 0)
         {
@@ -99,7 +102,9 @@ public sealed class MechanicObserver : IDisposable
             var away = new Vector2(player.Position.X - snapshot.CasterPosition.X, player.Position.Z - snapshot.CasterPosition.Z);
             var moveAngle = MathF.Atan2(moved.X, moved.Y);
             var vsAway = Degrees(moveAngle - MathF.Atan2(away.X, away.Y));
-            moves.Add((player, moved.Length(), vsAway));
+            // 混沌の風などで距離が変わっていたら、元の距離に割り戻して比べる。
+            var multiplier = this.forced.Multiplier(player.Statuses, player.Rotation, player.Position, snapshot.CasterPosition);
+            moves.Add((player, moved.Length() / multiplier, vsAway));
 
             if (moved.Length() >= MoveThreshold)
             {
@@ -179,7 +184,7 @@ public sealed class MechanicObserver : IDisposable
         };
     }
 
-    private sealed record Observed(uint Id, string Name, Vector3 Position, float Rotation);
+    private sealed record Observed(uint Id, string Name, Vector3 Position, float Rotation, List<uint> Statuses);
 
     private sealed class Snapshot(uint actionId, string actionName, Vector3 casterPosition, List<Observed> players)
     {

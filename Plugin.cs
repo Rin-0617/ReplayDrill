@@ -48,7 +48,7 @@ public sealed class Plugin : IDalamudPlugin
 
         this.ghost = new GhostController(configuration, framework, condition, keyState, gamepad, objectTable, clientState, interop, log);
         this.forced = new ForcedMovement(this.ghost, configuration, dataManager, objectTable, framework, log);
-        this.observer = new MechanicObserver(this.ghost, configuration, objectTable, framework, log);
+        this.observer = new MechanicObserver(this.ghost, this.forced, configuration, objectTable, framework, log);
         this.judge = new HitJudge(this.ghost, this.forced, this.observer, new AoeGeometryResolver(dataManager), objectTable, framework, interop, log);
         this.overlay = new GhostOverlay(this.ghost, this.judge, gameGui);
         this.mainWindow = new MainWindow(configuration, this.ghost, this.judge, textures);

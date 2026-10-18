@@ -39,6 +39,9 @@ public sealed partial class ForcedMovement : IDisposable
     private readonly IPluginLog log;
     private readonly Dictionary<uint, MarchDirection> marchOrders = [];
     private readonly HashSet<uint> marchStatuses = [];
+
+    /// <summary>ノックバックの距離を変えるデバフ（混沌の風など）。正面・背面から受けたときの倍率。</summary>
+    private readonly Dictionary<uint, (float Front, float Back)> knockbackModifiers = [];
     private MarchDirection? lastOrder;
 
     public ForcedMovement(GhostController ghost, Configuration configuration, IDataManager dataManager, IObjectTable objectTable, IFramework framework, IPluginLog log)
@@ -78,7 +81,8 @@ public sealed partial class ForcedMovement : IDisposable
             _ => away.LengthSquared() > 1e-6f ? Vector2.Normalize(away) : FromAngle(sourceRotation),
         };
 
-        this.ghost.Displace(direction, data.Distance, data.Speed > 0 ? data.Speed : DefaultSpeed);
+        var distance = data.Distance * this.AnchorMultiplier(source);
+        this.ghost.Displace(direction, distance, data.Speed > 0 ? data.Speed : DefaultSpeed);
         this.log.Debug($"[ReplayDrill] Knockback row {row}: {data.Distance}y dir={data.Direction}");
     }
 
@@ -96,8 +100,9 @@ public sealed partial class ForcedMovement : IDisposable
             return false;
         }
 
-        this.ghost.Displace(Vector2.Normalize(away), learned.Distance, DefaultSpeed);
-        this.log.Debug($"[ReplayDrill] Learned knockback {actionId} {learned.Name}: {learned.Distance}y");
+        var distance = learned.Distance * this.AnchorMultiplier(source);
+        this.ghost.Displace(Vector2.Normalize(away), distance, DefaultSpeed);
+        this.log.Debug($"[ReplayDrill] Learned knockback {actionId} {learned.Name}: {learned.Distance}y x{distance / learned.Distance:0.##}");
         return true;
     }
 
@@ -125,6 +130,46 @@ public sealed partial class ForcedMovement : IDisposable
         var move = Math.Clamp(distance - remain, 0f, data.MaxDistance > 0 ? data.MaxDistance : distance);
         this.ghost.Displace(toward / distance, move, data.Speed > 0 ? data.Speed : DefaultSpeed);
         this.log.Debug($"[ReplayDrill] Attract row {row}: {move:0.0}y");
+    }
+
+    /// <summary>
+    /// ノックバックの距離の倍率。距離を変えるデバフがあれば、発生源を正面に受けたか背面に受けたかで決まる。
+    /// </summary>
+    /// <param name="statusIds">受けた人のステータス。</param>
+    /// <param name="rotation">受けた人の向き。</param>
+    /// <param name="position">受けた人の位置。</param>
+    /// <param name="source">ノックバックの発生源。</param>
+    public float Multiplier(IEnumerable<uint> statusIds, float rotation, Vector3 position, Vector3 source)
+    {
+        var toSource = Flat(source - position);
+        if (toSource.LengthSquared() < 1e-6f)
+        {
+            return 1f;
+        }
+
+        // 発生源の方向が、向いている方向から左右90°以内なら正面。
+        var front = Vector2.Dot(FromAngle(rotation), Vector2.Normalize(toSource)) >= 0f;
+        var multiplier = 1f;
+        foreach (var id in statusIds)
+        {
+            if (this.knockbackModifiers.TryGetValue(id, out var modifier))
+            {
+                multiplier *= front ? modifier.Front : modifier.Back;
+            }
+        }
+
+        return multiplier;
+    }
+
+    /// <summary>動かしているキャラ（録画のステータス・今の向きと位置）の倍率。</summary>
+    private float AnchorMultiplier(Vector3 source)
+    {
+        if (this.objectTable.FirstOrDefault(o => o.GameObjectId == this.ghost.AnchorId) is not IBattleChara anchor)
+        {
+            return 1f;
+        }
+
+        return this.Multiplier(anchor.StatusList.Select(s => s.StatusId), this.ghost.Rotation, this.ghost.Position, source);
     }
 
     /// <summary>
@@ -183,7 +228,14 @@ public sealed partial class ForcedMovement : IDisposable
                     continue;
                 }
 
-                var match = OrderRegex().Match(status.Description.ExtractText());
+                var description = status.Description.ExtractText();
+                var modifier = KnockbackModifierRegex().Match(description);
+                if (modifier.Success)
+                {
+                    this.knockbackModifiers[status.RowId] = (Factor(modifier.Groups[1].Value), Factor(modifier.Groups[2].Value));
+                }
+
+                var match = OrderRegex().Match(description);
                 if (match.Success)
                 {
                     this.marchOrders[status.RowId] = match.Groups[1].Value switch
@@ -201,12 +253,17 @@ public sealed partial class ForcedMovement : IDisposable
             this.log.Error(ex, "Failed to load forced march statuses.");
         }
 
-        this.log.Debug($"[ReplayDrill] Forced march: {this.marchOrders.Count} orders, {this.marchStatuses.Count} march statuses.");
+        this.log.Debug($"[ReplayDrill] Forced march: {this.marchOrders.Count} orders, {this.marchStatuses.Count} march statuses, {this.knockbackModifiers.Count} knockback modifiers.");
     }
+
+    private static float Factor(string word) => word == "倍増" ? 2f : 0.5f;
 
     private static Vector2 Flat(Vector3 v) => new(v.X, v.Z);
 
     private static Vector2 FromAngle(float angle) => new(MathF.Sin(angle), MathF.Cos(angle));
+
+    [GeneratedRegex("正面から受けた場合は(倍増|半減)し、背面から受けた場合は(倍増|半減)")]
+    private static partial Regex KnockbackModifierRegex();
 
     [GeneratedRegex("(?:切れた際に?|終了時)、?(前|後|左|右)方向に移動してしまう")]
     private static partial Regex OrderRegex();
