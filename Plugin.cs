@@ -33,6 +33,7 @@ public sealed class Plugin : IDalamudPlugin
         IObjectTable objectTable,
         IGameGui gameGui,
         IDataManager dataManager,
+        ITextureProvider textures,
         IGameInteropProvider interop,
         IPluginLog log)
     {
@@ -45,7 +46,7 @@ public sealed class Plugin : IDalamudPlugin
         this.ghost = new GhostController(configuration, framework, condition, keyState, gamepad, objectTable, interop, log);
         this.judge = new HitJudge(this.ghost, new AoeGeometryResolver(dataManager), objectTable, framework, interop, log);
         this.overlay = new GhostOverlay(this.ghost, this.judge, gameGui);
-        this.mainWindow = new MainWindow(configuration, this.ghost, this.judge);
+        this.mainWindow = new MainWindow(configuration, this.ghost, this.judge, textures);
         this.windowSystem.AddWindow(this.mainWindow);
 
         pluginInterface.UiBuilder.Draw += this.Draw;

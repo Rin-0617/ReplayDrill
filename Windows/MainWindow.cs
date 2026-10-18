@@ -1,6 +1,9 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
 using ReplayDrill.Services;
 
 namespace ReplayDrill.Windows;
@@ -10,14 +13,16 @@ public sealed class MainWindow : Window
     private readonly Configuration configuration;
     private readonly GhostController ghost;
     private readonly HitJudge judge;
+    private readonly ITextureProvider textures;
     private ulong anchorId;
 
-    public MainWindow(Configuration configuration, GhostController ghost, HitJudge judge)
+    public MainWindow(Configuration configuration, GhostController ghost, HitJudge judge, ITextureProvider textures)
         : base($"ReplayDrill {Plugin.VersionText}###ReplayDrillMain")
     {
         this.configuration = configuration;
         this.ghost = ghost;
         this.judge = judge;
+        this.textures = textures;
         this.SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(360, 260),
@@ -45,7 +50,10 @@ public sealed class MainWindow : Window
 
     private void DrawPractice()
     {
-        var candidates = this.ghost.Candidates.ToList();
+        // タンク・ヒーラー・DPS の順（ゲームのパーティリストと同じ並び）。
+        var candidates = this.ghost.Candidates
+            .OrderBy(c => c.ClassJob.ValueNullable?.UIPriority ?? byte.MaxValue)
+            .ToList();
         if (candidates.Count == 0)
         {
             ImGui.TextDisabled("プレイヤーキャラが見つかりません。");
@@ -58,12 +66,17 @@ public sealed class MainWindow : Window
         }
 
         var anchor = candidates.First(c => c.GameObjectId == this.anchorId);
-        ImGui.SetNextItemWidth(220);
-        if (ImGui.BeginCombo("動かすキャラ", anchor.Name.TextValue))
+        var iconSize = new Vector2(ImGui.GetFrameHeight());
+        this.DrawJobIcon(anchor, iconSize);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(240);
+        if (ImGui.BeginCombo("動かすキャラ", Label(anchor)))
         {
             foreach (var candidate in candidates)
             {
-                if (ImGui.Selectable(candidate.Name.TextValue, candidate.GameObjectId == this.anchorId))
+                this.DrawJobIcon(candidate, iconSize);
+                ImGui.SameLine();
+                if (ImGui.Selectable($"{Label(candidate)}##{candidate.GameObjectId}", candidate.GameObjectId == this.anchorId, ImGuiSelectableFlags.None, new Vector2(0, iconSize.Y)))
                 {
                     this.anchorId = candidate.GameObjectId;
                 }
@@ -195,6 +208,37 @@ public sealed class MainWindow : Window
         }
 
         ImGui.TextDisabled($"判定フック: {this.judge.HookStatus}");
+    }
+
+    private void DrawJobIcon(IBattleChara character, Vector2 size)
+    {
+        var job = character.ClassJob.RowId;
+        if (job == 0)
+        {
+            ImGui.Dummy(size);
+            return;
+        }
+
+        // 062100 + ジョブ番号が、枠付きのジョブアイコン。
+        var wrap = this.textures.GetFromGameIcon(new GameIconLookup(62100 + job)).GetWrapOrEmpty();
+        ImGui.Image(wrap.Handle, size);
+    }
+
+    /// <summary>
+    /// 日本語のジョブ名。リプレイでは名前が英語のジョブ名に置き換わるので、
+    /// 実名が残っているときだけ名前を添える。
+    /// </summary>
+    private static string Label(IBattleChara character)
+    {
+        var name = character.Name.TextValue;
+        if (character.ClassJob.ValueNullable is not { } job)
+        {
+            return name;
+        }
+
+        var jobName = job.Name.ExtractText();
+        var isJobPlaceholder = string.Equals(name, job.NameEnglish.ExtractText(), StringComparison.OrdinalIgnoreCase);
+        return isJobPlaceholder ? jobName : $"{jobName} - {name}";
     }
 
     private static string ShapeName(Geometry.AoeShape shape) => shape switch
