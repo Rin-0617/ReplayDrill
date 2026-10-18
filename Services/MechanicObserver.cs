@@ -34,6 +34,10 @@ public sealed class MechanicObserver : IDisposable
     private readonly IPluginLog log;
     private readonly Dictionary<uint, HashSet<uint>> statuses = [];
     private readonly List<Snapshot> snapshots = [];
+    private readonly List<Candidate> candidates = [];
+
+    /// <summary>練習を始めてからの再生時間（秒）。</summary>
+    private float clock;
 
     public MechanicObserver(GhostController ghost, ForcedMovement forced, Configuration configuration, IObjectTable objectTable, IFramework framework, IPluginLog log)
     {
@@ -61,7 +65,7 @@ public sealed class MechanicObserver : IDisposable
             .ToList();
         if (players.Count > 0)
         {
-            this.snapshots.Add(new Snapshot(actionId, actionName, casterPosition, players));
+            this.snapshots.Add(new Snapshot(actionId, actionName, casterPosition, players) { Start = this.clock });
         }
     }
 
@@ -71,22 +75,79 @@ public sealed class MechanicObserver : IDisposable
         {
             this.statuses.Clear();
             this.snapshots.Clear();
+            this.candidates.Clear();
             return;
         }
 
         // 再生時間で数える（倍速や一時停止でも、技が当たってからの経過が録画と合うように）。
-        var elapsed = this.ghost.IsPaused ? 0f : (float)framework.UpdateDelta.TotalSeconds * this.ghost.PlaybackSpeed;
-        foreach (var snapshot in this.snapshots)
-        {
-            snapshot.Elapsed += elapsed;
-        }
+        this.clock += this.ghost.IsPaused ? 0f : (float)framework.UpdateDelta.TotalSeconds * this.ghost.PlaybackSpeed;
 
         this.LogStatusChanges();
-        foreach (var snapshot in this.snapshots.Where(s => s.Elapsed >= MoveCheckSeconds).ToList())
+        foreach (var snapshot in this.snapshots.Where(s => this.clock - s.Start >= MoveCheckSeconds).ToList())
         {
             this.snapshots.Remove(snapshot);
             this.Analyze(snapshot);
         }
+
+        this.ResolveCandidates();
+    }
+
+    /// <summary>
+    /// 前後に当たったほかの技の候補と比べて、ノックバックの原因を1つに決めてから保存する。
+    /// 近い時刻に当たった技は、同じノックバックの動きを測ってしまうため。
+    /// いちばん長い距離を測れた候補（ほぼ同じなら、発生源から真っすぐ外向きに動いていた候補）を採用する。
+    /// </summary>
+    private void ResolveCandidates()
+    {
+        foreach (var candidate in this.candidates.ToList())
+        {
+            // この候補の後3秒以内に当たった技の分析が、すべて終わるまで待つ。
+            if (!this.candidates.Contains(candidate) || this.clock - candidate.Start < MoveCheckSeconds * 2f)
+            {
+                continue;
+            }
+
+            var group = this.candidates.Where(c => MathF.Abs(c.Start - candidate.Start) <= MoveCheckSeconds).ToList();
+            var longest = group.Max(c => c.Distance);
+            var winner = group
+                .Where(c => c.Distance >= longest - 1f)
+                .OrderBy(c => c.MeanAngle)
+                .ThenBy(c => c.Start)
+                .First();
+            foreach (var member in group)
+            {
+                this.candidates.Remove(member);
+                if (member == winner || member.ActionId == winner.ActionId)
+                {
+                    continue;
+                }
+
+                // 前に誤って覚えていた技なら、一覧から外す。
+                if (this.configuration.LearnedKnockbacks.Remove(member.ActionId))
+                {
+                    this.configuration.Save();
+                    this.log.Information($"[ReplayDrill] Forgot knockback: {member.Name} ({member.ActionId}); the movement is explained by {winner.Name}.");
+                }
+                else
+                {
+                    this.log.Debug($"[ReplayDrill] Not learned {member.ActionId} {member.Name}: the movement is explained by {winner.Name}.");
+                }
+            }
+
+            this.Save(winner);
+        }
+    }
+
+    private void Save(Candidate candidate)
+    {
+        if (this.configuration.LearnedKnockbacks.TryGetValue(candidate.ActionId, out var known) && MathF.Abs(known.Distance - candidate.Distance) < 0.5f)
+        {
+            return;
+        }
+
+        this.configuration.LearnedKnockbacks[candidate.ActionId] = new LearnedKnockback { Name = candidate.Name, Distance = candidate.Distance };
+        this.configuration.Save();
+        this.log.Information($"[ReplayDrill] Learned knockback: {candidate.Name} ({candidate.ActionId}) {candidate.Distance}y from {candidate.Count} players.");
     }
 
     private void Analyze(Snapshot snapshot)
@@ -145,14 +206,8 @@ public sealed class MechanicObserver : IDisposable
         }
 
         var distance = MathF.Round(cluster.Average() * 2f) / 2f;
-        if (this.configuration.LearnedKnockbacks.TryGetValue(snapshot.ActionId, out var known) && MathF.Abs(known.Distance - distance) < 0.5f)
-        {
-            return;
-        }
-
-        this.configuration.LearnedKnockbacks[snapshot.ActionId] = new LearnedKnockback { Name = snapshot.ActionName, Distance = distance };
-        this.configuration.Save();
-        this.log.Information($"[ReplayDrill] Learned knockback: {snapshot.ActionName} ({snapshot.ActionId}) {distance}y from {cluster.Count} of {knocked.Count} players.");
+        var meanAngle = knocked.Where(m => MathF.Abs(m.Distance - median) <= ClusterTolerance).Average(m => MathF.Abs(m.VsAway));
+        this.candidates.Add(new Candidate(snapshot.Start, snapshot.ActionId, snapshot.ActionName, distance, meanAngle, cluster.Count));
     }
 
     private void LogStatusChanges()
@@ -195,6 +250,8 @@ public sealed class MechanicObserver : IDisposable
         };
     }
 
+    private sealed record Candidate(float Start, uint ActionId, string Name, float Distance, float MeanAngle, int Count);
+
     private sealed record Observed(uint Id, string Name, Vector3 Position, float Rotation, List<uint> Statuses);
 
     private sealed class Snapshot(uint actionId, string actionName, Vector3 casterPosition, List<Observed> players)
@@ -207,7 +264,7 @@ public sealed class MechanicObserver : IDisposable
 
         public List<Observed> Players { get; } = players;
 
-        /// <summary>技が当たってからの再生時間（秒）。</summary>
-        public float Elapsed { get; set; }
+        /// <summary>技が当たった時刻（練習を始めてからの再生時間）。</summary>
+        public float Start { get; init; }
     }
 }
