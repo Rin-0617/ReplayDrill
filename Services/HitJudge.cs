@@ -33,6 +33,7 @@ public sealed unsafe class HitJudge : IDisposable
     private const int MaxResults = 200;
 
     private readonly GhostController ghost;
+    private readonly ForcedMovement forced;
     private readonly AoeGeometryResolver resolver;
     private readonly IObjectTable objectTable;
     private readonly IFramework framework;
@@ -42,9 +43,10 @@ public sealed unsafe class HitJudge : IDisposable
     private readonly List<PendingEffect> pending = [];
     private readonly List<JudgeResult> results = [];
 
-    public HitJudge(GhostController ghost, AoeGeometryResolver resolver, IObjectTable objectTable, IFramework framework, IGameInteropProvider interop, IPluginLog log)
+    public HitJudge(GhostController ghost, ForcedMovement forced, AoeGeometryResolver resolver, IObjectTable objectTable, IFramework framework, IGameInteropProvider interop, IPluginLog log)
     {
         this.ghost = ghost;
+        this.forced = forced;
         this.resolver = resolver;
         this.objectTable = objectTable;
         this.framework = framework;
@@ -121,9 +123,22 @@ public sealed unsafe class HitJudge : IDisposable
             {
                 var caster = (ClientGameObject*)casterPtr;
                 var targets = new List<ulong>(header->NumTargets);
+                var displacements = new List<Displacement>();
                 for (var i = 0; targetEntityIds != null && i < header->NumTargets; i++)
                 {
                     targets.Add(targetEntityIds[i].ObjectId);
+                    if (effects == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var e in effects[i].Effects)
+                    {
+                        if (e.Type is ForcedMovement.EffectKnockback or ForcedMovement.EffectAttract1 or ForcedMovement.EffectAttract2)
+                        {
+                            displacements.Add(new Displacement(targetEntityIds[i].ObjectId, e.Type, e.Value));
+                        }
+                    }
                 }
 
                 var effect = new PendingEffect(
@@ -137,7 +152,8 @@ public sealed unsafe class HitJudge : IDisposable
                     targetPos != null ? *targetPos : caster->Position,
                     caster->HitboxRadius,
                     header->AnimationTargetId.ObjectId,
-                    targets);
+                    targets,
+                    displacements);
 
                 lock (this.gate)
                 {
@@ -171,13 +187,20 @@ public sealed unsafe class HitJudge : IDisposable
         // 対象が多い技は複数回に分けて届くので、同じ発動は当たった人をまとめて1回だけ判定する。
         var merged = batch
             .GroupBy(e => (e.CasterId, e.ActionId, e.Sequence))
-            .Select(g => g.First() with { Targets = [.. g.SelectMany(e => e.Targets).Distinct()] });
+            .Select(g => g.First() with
+            {
+                Targets = [.. g.SelectMany(e => e.Targets).Distinct()],
+                Displacements = [.. g.SelectMany(e => e.Displacements)],
+            });
         foreach (var effect in merged)
         {
-            if (this.Judge(effect) is { } result)
+            var result = this.Judge(effect);
+            if (result is not null)
             {
                 this.Record(result);
             }
+
+            this.ApplyDisplacement(effect, result);
         }
     }
 
@@ -204,6 +227,40 @@ public sealed unsafe class HitJudge : IDisposable
 
         var hit = geometry.Contains(origin, effect.Rotation, effect.CasterHitbox, chargeLength, this.ghost.Position);
         return new JudgeResult(DateTime.Now, geometry.Name, geometry.ActionId, effect.CasterName, geometry.Shape, hit ? JudgeOutcome.Hit : JudgeOutcome.Dodged);
+    }
+
+    /// <summary>
+    /// 技にノックバック・引き寄せが付いていて、動かしているキャラも食らうべきなら、同じものをかける。
+    /// 範囲で判定できる技は「被弾」か「全体」のとき。判定できない技（単体対象・対象者の円）は、
+    /// 録画でそのキャラ本人が食らっていたとき。
+    /// </summary>
+    private void ApplyDisplacement(PendingEffect effect, JudgeResult? result)
+    {
+        if (effect.Displacements.Count == 0)
+        {
+            return;
+        }
+
+        var own = effect.Displacements.FirstOrDefault(d => d.TargetId == this.ghost.AnchorEntityId);
+        var apply = result?.Outcome switch
+        {
+            JudgeOutcome.Hit or JudgeOutcome.Unavoidable => own ?? effect.Displacements[0],
+            JudgeOutcome.Dodged => null,
+            _ => own,
+        };
+        if (apply is null)
+        {
+            return;
+        }
+
+        if (apply.Type == ForcedMovement.EffectKnockback)
+        {
+            this.forced.ApplyKnockback(apply.Row, effect.CasterPosition, effect.Rotation);
+        }
+        else
+        {
+            this.forced.ApplyAttract(apply.Row, effect.CasterPosition, effect.CasterHitbox);
+        }
     }
 
     /// <summary>録画の中で、生きているプレイヤー全員に当たったか（全体攻撃）。</summary>
@@ -294,5 +351,9 @@ public sealed unsafe class HitJudge : IDisposable
         Vector3 TargetPosition,
         float CasterHitbox,
         uint MainTargetId,
-        List<ulong> Targets);
+        List<ulong> Targets,
+        List<Displacement> Displacements);
+
+    /// <summary>技の効果に含まれていたノックバック・引き寄せ（対象・種類・シートの行）。</summary>
+    private sealed record Displacement(ulong TargetId, byte Type, ushort Row);
 }

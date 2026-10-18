@@ -109,6 +109,15 @@ public sealed class MainWindow : Window
             this.ghost.Start(anchor);
         }
 
+        if (this.ghost.IsMarching)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.75f, 0.3f, 1f), "強制移動中（操作できません）");
+        }
+        else if (this.ghost.IsControlLocked)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.75f, 0.3f, 1f), "ノックバック中");
+        }
+
         ImGui.TextDisabled(this.ghost.Diagnostics);
         ImGui.TextDisabled($"移動キー（ゲームのキー設定）・マウス左右同時押し・左スティックで移動（カメラの向きが前）  再生速度 x{this.ghost.PlaybackSpeed:0.##}{(this.ghost.IsPaused ? "（一時停止中）" : string.Empty)}");
     }

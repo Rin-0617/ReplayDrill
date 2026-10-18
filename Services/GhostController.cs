@@ -43,6 +43,14 @@ public sealed unsafe class GhostController : IDisposable
     private float verticalVelocity;
     private bool jumpWasDown;
 
+    /// <summary>ノックバック・引き寄せで飛ばされている途中の向き・残りの距離・速さ。</summary>
+    private Vector2 displaceDirection;
+    private float displaceRemaining;
+    private float displaceSpeed;
+
+    /// <summary>強制移動で歩かされている向き（ゲームの Rotation と同じ表し方）。</summary>
+    private float marchRotation;
+
     public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IGamepadState gamepad, IObjectTable objectTable, IGameInteropProvider interop, IPluginLog log)
     {
         this.configuration = configuration;
@@ -82,6 +90,15 @@ public sealed unsafe class GhostController : IDisposable
     /// <summary>分身の出発点にした登場人物。</summary>
     public ulong AnchorId { get; private set; }
 
+    /// <summary>出発点にした登場人物のエンティティID（技の対象の照合用）。</summary>
+    public uint AnchorEntityId { get; private set; }
+
+    /// <summary>強制移動で歩かされている途中か。</summary>
+    public bool IsMarching { get; private set; }
+
+    /// <summary>ノックバックか強制移動で、操作できない状態か。</summary>
+    public bool IsControlLocked => this.displaceRemaining > 0f || this.IsMarching;
+
     /// <summary>動かない原因を調べるための、直近フレームの状態。</summary>
     public string Diagnostics { get; private set; } = string.Empty;
 
@@ -112,6 +129,9 @@ public sealed unsafe class GhostController : IDisposable
     public void Start(IGameObject anchor)
     {
         this.AnchorId = anchor.GameObjectId;
+        this.AnchorEntityId = anchor.EntityId;
+        this.displaceRemaining = 0f;
+        this.IsMarching = false;
         this.Position = anchor.Position;
         this.Rotation = anchor.Rotation;
         this.jumpHeight = 0f;
@@ -119,9 +139,43 @@ public sealed unsafe class GhostController : IDisposable
         this.Active = true;
     }
 
+    /// <summary>ノックバック・引き寄せ。壁に当たったらそこで止まる。</summary>
+    public void Displace(Vector2 direction, float distance, float speed)
+    {
+        if (!this.Active || distance <= 0f || direction.LengthSquared() < 1e-6f)
+        {
+            return;
+        }
+
+        this.displaceDirection = Vector2.Normalize(direction);
+        this.displaceRemaining = distance;
+        this.displaceSpeed = speed;
+    }
+
+    /// <summary>今のキャラの向きを基準に、指定の方向へ歩かせ始める。</summary>
+    public void StartMarch(MarchDirection direction)
+    {
+        var offset = direction switch
+        {
+            MarchDirection.Back => MathF.PI,
+            MarchDirection.Left => MathF.PI / 2f,
+            MarchDirection.Right => -MathF.PI / 2f,
+            _ => 0f,
+        };
+        this.marchRotation = this.Rotation + offset;
+        this.IsMarching = true;
+    }
+
+    public void StopMarch()
+    {
+        this.IsMarching = false;
+    }
+
     public void Stop()
     {
         this.Active = false;
+        this.IsMarching = false;
+        this.displaceRemaining = 0f;
         this.pinnedAddress = 0;
     }
 
@@ -146,7 +200,21 @@ public sealed unsafe class GhostController : IDisposable
             return;
         }
 
-        this.Move(framework);
+        if (this.displaceRemaining > 0f)
+        {
+            this.SwallowMoveKeys();
+            this.UpdateDisplacement(framework);
+        }
+        else if (this.IsMarching)
+        {
+            this.SwallowMoveKeys();
+            this.UpdateMarch(framework);
+        }
+        else
+        {
+            this.Move(framework);
+        }
+
         this.UpdateJump(framework);
         this.PinAnchor();
     }
@@ -177,13 +245,7 @@ public sealed unsafe class GhostController : IDisposable
 
         var input = new Vector2((d ? 1f : 0f) - (a ? 1f : 0f), (w || mouseForward ? 1f : 0f) - (s ? 1f : 0f)) + stick;
 
-        if (this.configuration.SwallowMoveKeys)
-        {
-            foreach (var key in MoveBindings.Keys())
-            {
-                this.keyState[key] = false;
-            }
-        }
+        this.SwallowMoveKeys();
 
         if (input == Vector2.Zero || !cameraOk)
         {
@@ -205,6 +267,60 @@ public sealed unsafe class GhostController : IDisposable
         next.Y = GroundHeight(next) ?? this.Position.Y;
         this.Position = next;
         this.Rotation = MathF.Atan2(direction.X, direction.Y);
+    }
+
+    private void SwallowMoveKeys()
+    {
+        if (!this.configuration.SwallowMoveKeys || ImGui.GetIO().WantTextInput || !IsGameFocused())
+        {
+            return;
+        }
+
+        foreach (var key in MoveBindings.Keys())
+        {
+            this.keyState[key] = false;
+        }
+    }
+
+    private float TimeScale => this.configuration.ScaleWithPlaybackSpeed && !this.IsPaused ? this.PlaybackSpeed : 1f;
+
+    private void UpdateDisplacement(IFramework framework)
+    {
+        var step = MathF.Min(this.displaceRemaining, this.displaceSpeed * this.TimeScale * (float)framework.UpdateDelta.TotalSeconds);
+        this.displaceRemaining -= step;
+        if (!this.TryStep(this.displaceDirection, step))
+        {
+            this.displaceRemaining = 0f;
+        }
+    }
+
+    private void UpdateMarch(IFramework framework)
+    {
+        var direction = new Vector2(MathF.Sin(this.marchRotation), MathF.Cos(this.marchRotation));
+        var step = this.configuration.MoveSpeed * this.TimeScale * (float)framework.UpdateDelta.TotalSeconds;
+        this.Rotation = this.marchRotation;
+        this.TryStep(direction, step);
+    }
+
+    /// <summary>水平に1歩進める。壁にぶつかるなら進まずに false を返す。</summary>
+    private bool TryStep(Vector2 direction, float distance)
+    {
+        if (distance <= 0f)
+        {
+            return true;
+        }
+
+        var origin = this.Position + new Vector3(0f, 1f, 0f);
+        var direction3 = new Vector3(direction.X, 0f, direction.Y);
+        if (BGCollisionModule.RaycastMaterialFilter(origin, direction3, out _, distance + 0.3f))
+        {
+            return false;
+        }
+
+        var next = this.Position + (direction3 * distance);
+        next.Y = GroundHeight(next) ?? this.Position.Y;
+        this.Position = next;
+        return true;
     }
 
     /// <summary>ジャンプのキー（パッドは下ボタン）で跳び、放物線を描いて床に戻る。AoE の判定には影響しない。</summary>
