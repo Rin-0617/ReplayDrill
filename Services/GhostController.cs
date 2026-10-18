@@ -32,6 +32,7 @@ public sealed unsafe class GhostController : IDisposable
     private readonly IKeyState keyState;
     private readonly IGamepadState gamepad;
     private readonly IObjectTable objectTable;
+    private readonly IClientState clientState;
     private readonly Hook<ClientGameObject.Delegates.SetPosition>? setPositionHook;
     private readonly Hook<ClientGameObject.Delegates.SetRotation>? setRotationHook;
 
@@ -51,8 +52,9 @@ public sealed unsafe class GhostController : IDisposable
     /// <summary>強制移動で歩かされている向き（ゲームの Rotation と同じ表し方）。</summary>
     private float marchRotation;
 
-    public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IGamepadState gamepad, IObjectTable objectTable, IGameInteropProvider interop, IPluginLog log)
+    public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IGamepadState gamepad, IObjectTable objectTable, IClientState clientState, IGameInteropProvider interop, IPluginLog log)
     {
+        this.clientState = clientState;
         this.configuration = configuration;
         this.framework = framework;
         this.condition = condition;
@@ -64,8 +66,8 @@ public sealed unsafe class GhostController : IDisposable
         {
             this.setPositionHook = interop.HookFromAddress<ClientGameObject.Delegates.SetPosition>(ClientGameObject.Addresses.SetPosition.Value, this.SetPositionDetour);
             this.setRotationHook = interop.HookFromAddress<ClientGameObject.Delegates.SetRotation>(ClientGameObject.Addresses.SetRotation.Value, this.SetRotationDetour);
-            this.setPositionHook.Enable();
-            this.setRotationHook.Enable();
+
+            // 練習している間だけ有効にする（Start / Stop）。
         }
         catch (Exception ex)
         {
@@ -73,6 +75,10 @@ public sealed unsafe class GhostController : IDisposable
         }
 
         this.framework.Update += this.OnUpdate;
+
+        // リプレイの終了はエリア移動として届く。検知したら、その場で差し替えを止める。
+        this.clientState.TerritoryChanged += this.OnTerritoryChanged;
+        this.clientState.Logout += this.OnLogout;
     }
 
     /// <summary>練習中か（分身を出しているか）。</summary>
@@ -103,6 +109,25 @@ public sealed unsafe class GhostController : IDisposable
     public string Diagnostics { get; private set; } = string.Empty;
 
     public bool IsReplay => this.condition[ConditionFlag.DutyRecorderPlayback];
+
+    /// <summary>
+    /// リプレイを再生中か（一時停止中も含む）。位置を書き換える直前に毎回確かめる。
+    /// リプレイが終わると、録画のキャラが使っていたメモリに本物の自分のキャラが入るので、
+    /// 再生中でなければ絶対に書き換えない。
+    /// </summary>
+    public bool IsPlayingReplay
+    {
+        get
+        {
+            if (!this.IsReplay)
+            {
+                return false;
+            }
+
+            var replay = ContentsReplayManager.Instance();
+            return replay is not null && replay->PlaybackControls.HasFlag(ContentsReplayPlaybackControl.InPlayback);
+        }
+    }
 
     public bool IsPaused
     {
@@ -137,6 +162,8 @@ public sealed unsafe class GhostController : IDisposable
         this.jumpHeight = 0f;
         this.verticalVelocity = 0f;
         this.Active = true;
+        this.setPositionHook?.Enable();
+        this.setRotationHook?.Enable();
     }
 
     /// <summary>ノックバック・引き寄せ。壁に当たったらそこで止まる。</summary>
@@ -173,15 +200,19 @@ public sealed unsafe class GhostController : IDisposable
 
     public void Stop()
     {
+        this.pinnedAddress = 0;
+        this.setPositionHook?.Disable();
+        this.setRotationHook?.Disable();
         this.Active = false;
         this.IsMarching = false;
         this.displaceRemaining = 0f;
-        this.pinnedAddress = 0;
     }
 
     public void Dispose()
     {
         this.framework.Update -= this.OnUpdate;
+        this.clientState.TerritoryChanged -= this.OnTerritoryChanged;
+        this.clientState.Logout -= this.OnLogout;
         this.pinnedAddress = 0;
         this.setPositionHook?.Dispose();
         this.setRotationHook?.Dispose();
@@ -194,7 +225,7 @@ public sealed unsafe class GhostController : IDisposable
             return;
         }
 
-        if (!this.IsReplay)
+        if (!this.IsPlayingReplay)
         {
             this.Stop();
             return;
@@ -236,7 +267,7 @@ public sealed unsafe class GhostController : IDisposable
         // FF14 と同じく、マウスの左右ボタンを同時に押している間は前進。窓の上でのクリックは除く。
         var mouseForward = IsDown(VirtualKey.LBUTTON) && IsDown(VirtualKey.RBUTTON) && !ImGui.GetIO().WantCaptureMouse;
         var stick = this.ReadLeftStick();
-        this.Diagnostics = $"{MoveBindings.Describe()}  前:{w} 後:{s} 左:{a} 右:{d} マウス前進:{mouseForward} スティック:{stick.X:0.00},{stick.Y:0.00} 入力中:{typing} 前面:{focused} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
+        this.Diagnostics = $"{MoveBindings.Describe()}  前:{w} 後:{s} 左:{a} 右:{d} マウス前進:{mouseForward} スティック:{stick.X:0.00},{stick.Y:0.00} 入力中:{typing} 前面:{focused} 再生中:{this.IsPlayingReplay} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
             + $"位置:{this.Position.X:0.0},{this.Position.Y:0.0},{this.Position.Z:0.0}";
         if (typing || !focused)
         {
@@ -362,7 +393,7 @@ public sealed unsafe class GhostController : IDisposable
     private void PinAnchor()
     {
         var anchor = this.objectTable.FirstOrDefault(o => o.GameObjectId == this.AnchorId);
-        if (anchor is null)
+        if (anchor is null || anchor.EntityId != this.AnchorEntityId)
         {
             this.pinnedAddress = 0;
             return;
@@ -370,14 +401,31 @@ public sealed unsafe class GhostController : IDisposable
 
         this.pinnedAddress = anchor.Address;
         var native = (ClientGameObject*)anchor.Address;
+        if (!this.ShouldPin(native))
+        {
+            return;
+        }
+
         var display = this.DisplayPosition;
         native->SetPosition(display.X, display.Y, display.Z);
         native->SetRotation(this.Rotation);
     }
 
+    /// <summary>この書き込みを分身の位置に差し替えてよいか。リプレイ再生中の、選んだキャラ本人だけ。</summary>
+    private bool ShouldPin(ClientGameObject* target) =>
+        this.Active
+        && this.pinnedAddress != 0
+        && (nint)target == this.pinnedAddress
+        && target->EntityId == this.AnchorEntityId
+        && this.IsPlayingReplay;
+
+    private void OnTerritoryChanged(uint territory) => this.Stop();
+
+    private void OnLogout(int type, int code) => this.Stop();
+
     private void SetPositionDetour(ClientGameObject* thisPtr, float x, float y, float z)
     {
-        if (this.pinnedAddress != 0 && (nint)thisPtr == this.pinnedAddress)
+        if (this.ShouldPin(thisPtr))
         {
             var display = this.DisplayPosition;
             (x, y, z) = (display.X, display.Y, display.Z);
@@ -388,7 +436,7 @@ public sealed unsafe class GhostController : IDisposable
 
     private void SetRotationDetour(ClientGameObject* thisPtr, float value)
     {
-        if (this.pinnedAddress != 0 && (nint)thisPtr == this.pinnedAddress)
+        if (this.ShouldPin(thisPtr))
         {
             value = this.Rotation;
         }
