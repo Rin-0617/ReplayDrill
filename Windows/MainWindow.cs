@@ -59,7 +59,7 @@ public sealed class MainWindow : Window
 
         var anchor = candidates.First(c => c.GameObjectId == this.anchorId);
         ImGui.SetNextItemWidth(220);
-        if (ImGui.BeginCombo("分身の出発点", anchor.Name.TextValue))
+        if (ImGui.BeginCombo("動かすキャラ", anchor.Name.TextValue))
         {
             foreach (var candidate in candidates)
             {
@@ -81,7 +81,7 @@ public sealed class MainWindow : Window
             }
 
             ImGui.SameLine();
-            ImGui.TextDisabled("始めると、選んだ人の足元に分身が出ます。");
+            ImGui.TextDisabled("始めると、選んだキャラをWASDで動かせます。");
             return;
         }
 
@@ -94,13 +94,6 @@ public sealed class MainWindow : Window
         if (ImGui.Button("出発点に戻す"))
         {
             this.ghost.Start(anchor);
-        }
-
-        var move = this.configuration.MoveReplayCharacter;
-        if (ImGui.Checkbox("リプレイのキャラ自体を動かす", ref move))
-        {
-            this.configuration.MoveReplayCharacter = move;
-            this.configuration.Save();
         }
 
         ImGui.TextDisabled(this.ghost.Diagnostics);
@@ -190,14 +183,6 @@ public sealed class MainWindow : Window
         if (ImGui.Checkbox("練習中はWASDをゲームに渡さない", ref swallow))
         {
             this.configuration.SwallowMoveKeys = swallow;
-            changed = true;
-        }
-
-        var radius = this.configuration.GhostRadius;
-        ImGui.SetNextItemWidth(160);
-        if (ImGui.SliderFloat("印の大きさ", ref radius, 0.2f, 2f, "%.1f"))
-        {
-            this.configuration.GhostRadius = radius;
             changed = true;
         }
 

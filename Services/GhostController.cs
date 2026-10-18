@@ -14,8 +14,8 @@ using GameCameraManager = FFXIVClientStructs.FFXIV.Client.Game.Control.CameraMan
 namespace ReplayDrill.Services;
 
 /// <summary>
-/// リプレイ再生中に WASD で動かす「分身」。リプレイの登場人物は動かせないので、
-/// 位置だけを持つ仮想の点として扱い、印は <see cref="Windows.GhostOverlay"/> が描く。
+/// リプレイ再生中に WASD で動かす「分身」。選んだ登場人物の位置と向きを、
+/// リプレイ側の書き込みを差し替えて分身のものに保つ。
 /// </summary>
 public sealed unsafe class GhostController : IDisposable
 {
@@ -130,14 +130,7 @@ public sealed unsafe class GhostController : IDisposable
 
         this.Move(framework);
 
-        if (this.configuration.MoveReplayCharacter)
-        {
-            this.PinAnchor();
-        }
-        else
-        {
-            this.pinnedAddress = 0;
-        }
+        this.PinAnchor();
     }
 
     private void Move(IFramework framework)
@@ -190,7 +183,7 @@ public sealed unsafe class GhostController : IDisposable
     }
 
     /// <summary>
-    /// 出発点にした登場人物を、分身の位置へ置き直す（実験的）。リプレイの再生は
+    /// 出発点にした登場人物を、分身の位置へ置き直す。リプレイの再生は
     /// オフラインなので、書き換えても他人には影響しない。リプレイ側がこの人物の位置を
     /// 書き込んでも、<see cref="SetPositionDetour"/> が分身の位置に差し替える。
     /// </summary>
