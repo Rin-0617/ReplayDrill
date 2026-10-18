@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Keys;
@@ -141,36 +142,25 @@ public sealed unsafe class GhostController : IDisposable
 
     private void Move(IFramework framework)
     {
-        // チャットや ImGui の入力欄に文字を打っている間は動かさない。
+        // チャットや ImGui の入力欄に文字を打っている間と、ゲームの窓が前面にない間は動かさない。
         var typing = ImGui.GetIO().WantTextInput;
+        var focused = IsGameFocused();
         var cameraOk = TryGetCameraForward(out var forward);
-        this.Diagnostics = $"W:{this.keyState[VirtualKey.W]} A:{this.keyState[VirtualKey.A]} S:{this.keyState[VirtualKey.S]} D:{this.keyState[VirtualKey.D]} "
-            + $"入力中:{typing} 一時停止:{this.IsPaused} カメラ:{cameraOk} 位置:{this.Position.X:0.0},{this.Position.Y:0.0},{this.Position.Z:0.0}";
-        if (typing)
+
+        // キーは Windows から直接読む。ゲームのキー状態は下で消すので、そちらを読むと
+        // 押しっぱなしが「押していない」に見えてしまう。
+        var w = IsDown(VirtualKey.W);
+        var a = IsDown(VirtualKey.A);
+        var s = IsDown(VirtualKey.S);
+        var d = IsDown(VirtualKey.D);
+        this.Diagnostics = $"W:{w} A:{a} S:{s} D:{d} 入力中:{typing} 前面:{focused} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
+            + $"位置:{this.Position.X:0.0},{this.Position.Y:0.0},{this.Position.Z:0.0}";
+        if (typing || !focused)
         {
             return;
         }
 
-        var input = Vector2.Zero;
-        if (this.keyState[VirtualKey.W])
-        {
-            input.Y += 1f;
-        }
-
-        if (this.keyState[VirtualKey.S])
-        {
-            input.Y -= 1f;
-        }
-
-        if (this.keyState[VirtualKey.D])
-        {
-            input.X += 1f;
-        }
-
-        if (this.keyState[VirtualKey.A])
-        {
-            input.X -= 1f;
-        }
+        var input = new Vector2((d ? 1f : 0f) - (a ? 1f : 0f), (w ? 1f : 0f) - (s ? 1f : 0f));
 
         if (this.configuration.SwallowMoveKeys)
         {
@@ -180,7 +170,7 @@ public sealed unsafe class GhostController : IDisposable
             }
         }
 
-        if (input == Vector2.Zero || this.IsPaused || !cameraOk)
+        if (input == Vector2.Zero || !cameraOk)
         {
             return;
         }
@@ -188,7 +178,9 @@ public sealed unsafe class GhostController : IDisposable
         // カメラの向きを基準に、前後左右へ動かす。
         var right = new Vector2(-forward.Y, forward.X);
         var direction = Vector2.Normalize((forward * input.Y) + (right * input.X));
-        var speed = this.configuration.MoveSpeed * (this.configuration.ScaleWithPlaybackSpeed ? this.PlaybackSpeed : 1f);
+        // 一時停止中も、立ち位置を決められるように等速で動かす。
+        var scale = this.configuration.ScaleWithPlaybackSpeed && !this.IsPaused ? this.PlaybackSpeed : 1f;
+        var speed = this.configuration.MoveSpeed * scale;
         var step = direction * speed * (float)framework.UpdateDelta.TotalSeconds;
 
         var next = this.Position + new Vector3(step.X, 0f, step.Y);
@@ -236,6 +228,29 @@ public sealed unsafe class GhostController : IDisposable
 
         this.setRotationHook!.Original(thisPtr, value);
     }
+
+    private static bool IsDown(VirtualKey key) => (GetAsyncKeyState((int)key) & 0x8000) != 0;
+
+    private static bool IsGameFocused()
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == 0)
+        {
+            return false;
+        }
+
+        _ = GetWindowThreadProcessId(foreground, out var processId);
+        return processId == Environment.ProcessId;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int key);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out int processId);
 
     /// <summary>カメラの視線を水平に投影した向き（X, Z）。</summary>
     private static bool TryGetCameraForward(out Vector2 forward)

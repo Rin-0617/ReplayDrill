@@ -9,7 +9,7 @@ public sealed class Configuration : IPluginConfiguration
     [NonSerialized]
     private IDalamudPluginInterface? pluginInterface;
 
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
 
     /// <summary>分身の移動速度（ヤルム/秒）。通常の走りは 6。</summary>
     public float MoveSpeed { get; set; } = 6f;
@@ -20,8 +20,8 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>練習中は WASD をゲームに渡さない（ARR のカメラ操作などと競合しないように）。</summary>
     public bool SwallowMoveKeys { get; set; } = true;
 
-    /// <summary>（実験的）出発点にしたリプレイのキャラそのものを、分身の位置へ動かす。</summary>
-    public bool MoveReplayCharacter { get; set; }
+    /// <summary>出発点にしたリプレイのキャラそのものを、分身の位置へ動かす。</summary>
+    public bool MoveReplayCharacter { get; set; } = true;
 
     /// <summary>分身の印の半径（ヤルム）。見た目だけで、判定は中心の1点で行う。</summary>
     public float GhostRadius { get; set; } = 0.5f;
@@ -29,6 +29,15 @@ public sealed class Configuration : IPluginConfiguration
     public void Initialize(IDalamudPluginInterface pluginInterface)
     {
         this.pluginInterface = pluginInterface;
+
+        // v1 ではキャラを動かす方式が実験扱いで既定オフだった。
+        if (this.Version < 2)
+        {
+            this.MoveReplayCharacter = true;
+            this.Version = 2;
+            this.Save();
+        }
+
         this.Normalize();
     }
 

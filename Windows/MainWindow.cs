@@ -97,7 +97,7 @@ public sealed class MainWindow : Window
         }
 
         var move = this.configuration.MoveReplayCharacter;
-        if (ImGui.Checkbox("リプレイのキャラ自体を動かす（実験的）", ref move))
+        if (ImGui.Checkbox("リプレイのキャラ自体を動かす", ref move))
         {
             this.configuration.MoveReplayCharacter = move;
             this.configuration.Save();

@@ -40,28 +40,31 @@ public sealed class GhostOverlay
         var center = this.ghost.Position;
         var radius = this.configuration.GhostRadius;
 
-        var points = new List<Vector2>(Segments);
+        // 画面外の点があっても、見えている辺だけ描く。
+        var points = new Vector2?[Segments];
         for (var i = 0; i < Segments; i++)
         {
             var angle = i * MathF.Tau / Segments;
             var world = center + new Vector3(MathF.Sin(angle) * radius, 0f, MathF.Cos(angle) * radius);
-            if (!this.gameGui.WorldToScreen(world, out var screen))
+            points[i] = this.gameGui.WorldToScreen(world, out var screen) ? screen : null;
+        }
+
+        if (points.All(p => p.HasValue))
+        {
+            foreach (var point in points)
             {
-                return;
+                drawList.PathLineTo(point!.Value);
             }
 
-            points.Add(screen);
+            drawList.PathFillConvex(fill);
         }
 
-        foreach (var point in points)
+        for (var i = 0; i < Segments; i++)
         {
-            drawList.PathLineTo(point);
-        }
-
-        drawList.PathFillConvex(fill);
-        for (var i = 0; i < points.Count; i++)
-        {
-            drawList.AddLine(points[i], points[(i + 1) % points.Count], color, 3f);
+            if (points[i] is { } from0 && points[(i + 1) % Segments] is { } to0)
+            {
+                drawList.AddLine(from0, to0, color, 3f);
+            }
         }
 
         // 向き（最後に動いた方向）を矢印で示す。
