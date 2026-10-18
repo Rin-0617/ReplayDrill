@@ -9,10 +9,10 @@ public sealed class Configuration : IPluginConfiguration
     [NonSerialized]
     private IDalamudPluginInterface? pluginInterface;
 
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
 
-    /// <summary>キャラの移動速度（ヤルム/秒）。通常の走りは 6。</summary>
-    public float MoveSpeed { get; set; } = 6f;
+    /// <summary>キャラの移動速度（ヤルム/秒）。実際の操作の感覚に近い 7 が既定。</summary>
+    public float MoveSpeed { get; set; } = 7f;
 
     /// <summary>再生速度に合わせて移動速度も変える。</summary>
     public bool ScaleWithPlaybackSpeed { get; set; } = true;
@@ -23,6 +23,19 @@ public sealed class Configuration : IPluginConfiguration
     public void Initialize(IDalamudPluginInterface pluginInterface)
     {
         this.pluginInterface = pluginInterface;
+
+        // v3 までの既定値 6 は、実際の操作より遅く感じた。
+        if (this.Version < 4)
+        {
+            if (this.MoveSpeed == 6f)
+            {
+                this.MoveSpeed = 7f;
+            }
+
+            this.Version = 4;
+            this.Save();
+        }
+
         this.Normalize();
     }
 
