@@ -23,7 +23,8 @@ public sealed class MechanicObserver : IDisposable
     private const float MoveThreshold = 3f;
     private const int MinKnockedPlayers = 3;
     private const float MaxAngleFromAway = 20f;
-    private const float MaxDistanceSpread = 3f;
+    /// <summary>中央値からこの範囲にいる人を「同じだけ飛ばされた」とみなす。</summary>
+    private const float ClusterTolerance = 1.5f;
 
     private readonly GhostController ghost;
     private readonly ForcedMovement forced;
@@ -117,23 +118,33 @@ public sealed class MechanicObserver : IDisposable
         this.TryLearn(snapshot, moves);
     }
 
-    /// <summary>当たった人のほとんどが、発生源から外向きにほぼ同じ距離だけ動いていたら、ノックバックとして覚える。</summary>
+    /// <summary>
+    /// 当たった人の多くが、発生源から外向きにほぼ同じ距離だけ動いていたら、ノックバックとして覚える。
+    /// アームズレングスなどで飛ばなかった人、着地後に歩いた人は外れ値として除き、中央値の近くに集まった人の平均を使う。
+    /// </summary>
     private void TryLearn(Snapshot snapshot, List<(Observed Player, float Distance, float VsAway)> moves)
     {
         var knocked = moves.Where(m => m.Distance >= MoveThreshold && MathF.Abs(m.VsAway) <= MaxAngleFromAway).ToList();
         if (knocked.Count < MinKnockedPlayers || knocked.Count < moves.Count * 0.6f)
         {
+            if (knocked.Count > 0)
+            {
+                this.log.Debug($"[ReplayDrill] Not learned {snapshot.ActionId} {snapshot.ActionName}: only {knocked.Count}/{moves.Count} moved outward.");
+            }
+
             return;
         }
 
         var distances = knocked.Select(m => m.Distance).Order().ToList();
-        if (distances[^1] - distances[0] > MaxDistanceSpread)
+        var median = distances[distances.Count / 2];
+        var cluster = distances.Where(d => MathF.Abs(d - median) <= ClusterTolerance).ToList();
+        if (cluster.Count < MinKnockedPlayers)
         {
+            this.log.Debug($"[ReplayDrill] Not learned {snapshot.ActionId} {snapshot.ActionName}: base distances vary {string.Join(",", distances.Select(d => d.ToString("0.0")))}.");
             return;
         }
 
-        var median = distances[distances.Count / 2];
-        var distance = MathF.Round(median * 2f) / 2f;
+        var distance = MathF.Round(cluster.Average() * 2f) / 2f;
         if (this.configuration.LearnedKnockbacks.TryGetValue(snapshot.ActionId, out var known) && MathF.Abs(known.Distance - distance) < 0.5f)
         {
             return;
@@ -141,7 +152,7 @@ public sealed class MechanicObserver : IDisposable
 
         this.configuration.LearnedKnockbacks[snapshot.ActionId] = new LearnedKnockback { Name = snapshot.ActionName, Distance = distance };
         this.configuration.Save();
-        this.log.Information($"[ReplayDrill] Learned knockback: {snapshot.ActionName} ({snapshot.ActionId}) {distance}y from {knocked.Count} players.");
+        this.log.Information($"[ReplayDrill] Learned knockback: {snapshot.ActionName} ({snapshot.ActionId}) {distance}y from {cluster.Count} of {knocked.Count} players.");
     }
 
     private void LogStatusChanges()

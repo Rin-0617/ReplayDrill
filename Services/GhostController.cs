@@ -33,6 +33,7 @@ public sealed unsafe class GhostController : IDisposable
     private readonly IGamepadState gamepad;
     private readonly IObjectTable objectTable;
     private readonly IClientState clientState;
+    private readonly IPluginLog log;
     private readonly Hook<ClientGameObject.Delegates.SetPosition>? setPositionHook;
     private readonly Hook<ClientGameObject.Delegates.SetRotation>? setRotationHook;
 
@@ -55,6 +56,7 @@ public sealed unsafe class GhostController : IDisposable
     public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IGamepadState gamepad, IObjectTable objectTable, IClientState clientState, IGameInteropProvider interop, IPluginLog log)
     {
         this.clientState = clientState;
+        this.log = log;
         this.configuration = configuration;
         this.framework = framework;
         this.condition = condition;
@@ -321,6 +323,7 @@ public sealed unsafe class GhostController : IDisposable
         this.displaceRemaining -= step;
         if (!this.TryStep(this.displaceDirection, step))
         {
+            this.log.Debug($"[ReplayDrill] Knockback stopped by a wall with {this.displaceRemaining:0.0}y left.");
             this.displaceRemaining = 0f;
         }
     }

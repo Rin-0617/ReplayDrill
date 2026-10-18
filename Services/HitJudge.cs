@@ -300,6 +300,10 @@ public sealed unsafe class HitJudge : IDisposable
             {
                 this.forced.TryApplyLearned(effect.ActionId, effect.CasterPosition);
             }
+            else if (this.forced.HasLearned(effect.ActionId))
+            {
+                this.log.Debug($"[ReplayDrill] Learned knockback {effect.ActionId} not applied: outcome={result?.Outcome.ToString() ?? "not judged"}");
+            }
 
             return;
         }

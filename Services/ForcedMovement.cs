@@ -86,6 +86,8 @@ public sealed partial class ForcedMovement : IDisposable
         this.log.Debug($"[ReplayDrill] Knockback row {row}: {data.Distance}y dir={data.Direction}");
     }
 
+    public bool HasLearned(uint actionId) => this.configuration.LearnedKnockbacks.ContainsKey(actionId);
+
     /// <summary>録画から学習したノックバックがあれば、発生源から外向きにかける。</summary>
     public bool TryApplyLearned(uint actionId, Vector3 source)
     {
