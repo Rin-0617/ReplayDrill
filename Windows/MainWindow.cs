@@ -137,6 +137,9 @@ public sealed class MainWindow : Window
                 case JudgeOutcome.Dodged:
                     ImGui.TextColored(new Vector4(0.45f, 0.9f, 0.45f, 1f), "回避");
                     break;
+                case JudgeOutcome.Unavoidable:
+                    ImGui.TextDisabled("全体");
+                    break;
                 default:
                     ImGui.TextDisabled("対象者");
                     break;

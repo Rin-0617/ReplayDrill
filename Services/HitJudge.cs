@@ -17,6 +17,9 @@ public enum JudgeOutcome
 
     /// <summary>プレイヤーを中心にした円（散開・頭割りなど）。録画の本人の位置で決まるので判定しない。</summary>
     TargetCentered,
+
+    /// <summary>生きているプレイヤー全員に当たった技。全体攻撃なので避けようがない。</summary>
+    Unavoidable,
 }
 
 public sealed record JudgeResult(DateTime At, string ActionName, uint ActionId, string Caster, AoeShape Shape, JudgeOutcome Outcome);
@@ -165,8 +168,11 @@ public sealed unsafe class HitJudge : IDisposable
             this.pending.Clear();
         }
 
-        // 対象が多い技は複数回に分けて届くので、同じ発動は1回だけ判定する。
-        foreach (var effect in batch.DistinctBy(e => (e.CasterId, e.ActionId, e.Sequence)))
+        // 対象が多い技は複数回に分けて届くので、同じ発動は当たった人をまとめて1回だけ判定する。
+        var merged = batch
+            .GroupBy(e => (e.CasterId, e.ActionId, e.Sequence))
+            .Select(g => g.First() with { Targets = [.. g.SelectMany(e => e.Targets).Distinct()] });
+        foreach (var effect in merged)
         {
             if (this.Judge(effect) is { } result)
             {
@@ -191,8 +197,24 @@ public sealed unsafe class HitJudge : IDisposable
             return new JudgeResult(DateTime.Now, geometry.Name, geometry.ActionId, effect.CasterName, geometry.Shape, JudgeOutcome.TargetCentered);
         }
 
+        if (this.HitEveryLivingPlayer(effect))
+        {
+            return new JudgeResult(DateTime.Now, geometry.Name, geometry.ActionId, effect.CasterName, geometry.Shape, JudgeOutcome.Unavoidable);
+        }
+
         var hit = geometry.Contains(origin, effect.Rotation, effect.CasterHitbox, chargeLength, this.ghost.Position);
         return new JudgeResult(DateTime.Now, geometry.Name, geometry.ActionId, effect.CasterName, geometry.Shape, hit ? JudgeOutcome.Hit : JudgeOutcome.Dodged);
+    }
+
+    /// <summary>録画の中で、生きているプレイヤー全員に当たったか（全体攻撃）。</summary>
+    private bool HitEveryLivingPlayer(PendingEffect effect)
+    {
+        var living = this.objectTable.PlayerObjects
+            .OfType<Dalamud.Game.ClientState.Objects.Types.IBattleChara>()
+            .Where(p => p.CurrentHp > 0)
+            .Select(p => (ulong)p.EntityId)
+            .ToList();
+        return living.Count > 1 && living.All(effect.Targets.Contains);
     }
 
     private bool IsCenteredOnPlayer(AoeGeometry geometry, PendingEffect effect)
