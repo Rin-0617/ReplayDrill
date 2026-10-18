@@ -31,8 +31,16 @@ public sealed partial class ForcedMovement : IDisposable
 
     private const float DefaultSpeed = 20f;
 
+    /// <summary>
+    /// 技の効果として届かず、サーバーからの位置の移動で再現されるノックバック（技の ID → 発生源から外向きの距離）。
+    /// 録画で当たった人の動きを調べて決めた値。混沌の風などのデバフで、さらに増減する。
+    /// </summary>
+    private static readonly Dictionary<uint, float> BuiltInKnockbacks = new()
+    {
+        [47891] = 20f, // 絶妖星乱舞 P3 真空波（混沌の風・混沌の逆風で 10 か 40 になる）
+    };
+
     private readonly GhostController ghost;
-    private readonly Configuration configuration;
     private readonly IDataManager dataManager;
     private readonly IObjectTable objectTable;
     private readonly IFramework framework;
@@ -44,10 +52,9 @@ public sealed partial class ForcedMovement : IDisposable
     private readonly Dictionary<uint, (float Front, float Back)> knockbackModifiers = [];
     private MarchDirection? lastOrder;
 
-    public ForcedMovement(GhostController ghost, Configuration configuration, IDataManager dataManager, IObjectTable objectTable, IFramework framework, IPluginLog log)
+    public ForcedMovement(GhostController ghost, IDataManager dataManager, IObjectTable objectTable, IFramework framework, IPluginLog log)
     {
         this.ghost = ghost;
-        this.configuration = configuration;
         this.dataManager = dataManager;
         this.objectTable = objectTable;
         this.framework = framework;
@@ -86,12 +93,10 @@ public sealed partial class ForcedMovement : IDisposable
         this.log.Debug($"[ReplayDrill] Knockback row {row}: {data.Distance}y dir={data.Direction}");
     }
 
-    public bool HasLearned(uint actionId) => this.configuration.LearnedKnockbacks.ContainsKey(actionId);
-
-    /// <summary>録画から学習したノックバックがあれば、発生源から外向きにかける。</summary>
-    public bool TryApplyLearned(uint actionId, Vector3 source)
+    /// <summary>組み込みのノックバック（真空波など）があれば、発生源から外向きにかける。</summary>
+    public bool TryApplyBuiltIn(uint actionId, Vector3 source)
     {
-        if (!this.configuration.LearnedKnockbacks.TryGetValue(actionId, out var learned) || learned.Distance <= 0f)
+        if (!BuiltInKnockbacks.TryGetValue(actionId, out var baseDistance))
         {
             return false;
         }
@@ -102,9 +107,9 @@ public sealed partial class ForcedMovement : IDisposable
             return false;
         }
 
-        var distance = learned.Distance * this.AnchorMultiplier(source);
+        var distance = baseDistance * this.AnchorMultiplier(source);
         this.ghost.Displace(Vector2.Normalize(away), distance, DefaultSpeed);
-        this.log.Debug($"[ReplayDrill] Learned knockback {actionId} {learned.Name}: {learned.Distance}y x{distance / learned.Distance:0.##}");
+        this.log.Debug($"[ReplayDrill] Built-in knockback {actionId}: {baseDistance}y x{distance / baseDistance:0.##}");
         return true;
     }
 

@@ -34,7 +34,6 @@ public sealed unsafe class HitJudge : IDisposable
 
     private readonly GhostController ghost;
     private readonly ForcedMovement forced;
-    private readonly MechanicObserver observer;
     private readonly AoeGeometryResolver resolver;
     private readonly IObjectTable objectTable;
     private readonly IFramework framework;
@@ -44,11 +43,10 @@ public sealed unsafe class HitJudge : IDisposable
     private readonly List<PendingEffect> pending = [];
     private readonly List<JudgeResult> results = [];
 
-    public HitJudge(GhostController ghost, ForcedMovement forced, MechanicObserver observer, AoeGeometryResolver resolver, IObjectTable objectTable, IFramework framework, IGameInteropProvider interop, IPluginLog log)
+    public HitJudge(GhostController ghost, ForcedMovement forced, AoeGeometryResolver resolver, IObjectTable objectTable, IFramework framework, IGameInteropProvider interop, IPluginLog log)
     {
         this.ghost = ghost;
         this.forced = forced;
-        this.observer = observer;
         this.resolver = resolver;
         this.objectTable = objectTable;
         this.framework = framework;
@@ -241,12 +239,6 @@ public sealed unsafe class HitJudge : IDisposable
                 continue;
             }
 
-            if (effect.Targets.Any(t => this.objectTable.PlayerObjects.Any(p => p.EntityId == t)))
-            {
-                var name = this.resolver.Resolve(effect.ActionId)?.Name ?? $"Action {effect.ActionId}";
-                this.observer.OnEnemyEffect(effect.ActionId, name, effect.CasterPosition, effect.Targets);
-            }
-
             var result = this.Judge(effect);
             if (result is not null)
             {
@@ -295,14 +287,10 @@ public sealed unsafe class HitJudge : IDisposable
     {
         if (effect.Displacements.Count == 0)
         {
-            // 技の効果として届かないノックバックは、録画から学習したものを使う。
+            // 技の効果として届かず、サーバーからの位置の移動で再現されるノックバック（真空波など）。
             if (result?.Outcome is JudgeOutcome.Hit or JudgeOutcome.Unavoidable)
             {
-                this.forced.TryApplyLearned(effect.ActionId, effect.CasterPosition);
-            }
-            else if (this.forced.HasLearned(effect.ActionId))
-            {
-                this.log.Debug($"[ReplayDrill] Learned knockback {effect.ActionId} not applied: outcome={result?.Outcome.ToString() ?? "not judged"}");
+                this.forced.TryApplyBuiltIn(effect.ActionId, effect.CasterPosition);
             }
 
             return;
