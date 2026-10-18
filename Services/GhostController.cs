@@ -51,11 +51,6 @@ public sealed unsafe class GhostController : IDisposable
             log.Error(ex, "SetPosition/SetRotation hook failed.");
         }
 
-        this.configuration = configuration;
-        this.framework = framework;
-        this.condition = condition;
-        this.keyState = keyState;
-        this.objectTable = objectTable;
         this.framework.Update += this.OnUpdate;
     }
 
