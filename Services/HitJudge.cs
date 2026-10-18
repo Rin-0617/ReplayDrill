@@ -119,55 +119,9 @@ public sealed unsafe class HitJudge : IDisposable
     {
         try
         {
-            if (this.ghost.Active && casterPtr != null && header != null && header->ActionType == 1 && !IsFriendly((ClientGameObject*)casterPtr))
+            if (this.ghost.Active && casterPtr != null && header != null)
             {
-                var caster = (ClientGameObject*)casterPtr;
-                var targets = new List<ulong>(header->NumTargets);
-                var displacements = new List<Displacement>();
-                var summary = new System.Text.StringBuilder();
-                for (var i = 0; targetEntityIds != null && i < header->NumTargets; i++)
-                {
-                    targets.Add(targetEntityIds[i].ObjectId);
-                    if (effects == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (var e in effects[i].Effects)
-                    {
-                        // 効果の種類を調べるためのログ用（0=なし、3=ダメージ は省く）。
-                        if (e.Type is not (0 or 3))
-                        {
-                            summary.Append($" {targetEntityIds[i].ObjectId:X}:{e.Type}/{e.Value}/{e.Param0},{e.Param1},{e.Param2},{e.Param3},{e.Param4}");
-                        }
-
-                        if (e.Type is ForcedMovement.EffectKnockback or ForcedMovement.EffectAttract1 or ForcedMovement.EffectAttract2)
-                        {
-                            displacements.Add(new Displacement(targetEntityIds[i].ObjectId, e.Type, e.Value));
-                        }
-                    }
-                }
-
-                var effect = new PendingEffect(
-                    casterEntityId,
-                    header->ActionId,
-                    header->GlobalSequence,
-                    caster->NameString,
-                    caster->Position,
-                    // 発動時の向き（0..65535 → -π..π）。詠唱者の今の向きより正確。
-                    (header->RotationInt / 65535f * MathF.Tau) - MathF.PI,
-                    targetPos != null ? *targetPos : caster->Position,
-                    caster->HitboxRadius,
-                    header->AnimationTargetId.ObjectId,
-                    targets,
-                    displacements);
-
-                lock (this.gate)
-                {
-                    this.pending.Add(effect);
-                }
-
-                this.log.Debug($"[ReplayDrill] Effect {header->ActionId} from {caster->NameString} main={header->AnimationTargetId.ObjectId:X} targets={header->NumTargets} anchor={this.ghost.AnchorEntityId:X}{summary}");
+                this.Capture(casterEntityId, casterPtr, targetPos, header, effects, targetEntityIds);
             }
         }
         catch
@@ -175,7 +129,83 @@ public sealed unsafe class HitJudge : IDisposable
             // 判定の失敗で元の処理を壊さない。
         }
 
+        // 元の処理は必ず呼ぶ（呼ばないと技の効果がゲームに届かない）。
         this.hook!.Original(casterEntityId, casterPtr, targetPos, header, effects, targetEntityIds);
+    }
+
+    private void Capture(
+        uint casterEntityId,
+        ClientCharacter* casterPtr,
+        Vector3* targetPos,
+        ActionEffectHandler.Header* header,
+        ActionEffectHandler.TargetEffects* effects,
+        ClientGameObjectId* targetEntityIds)
+    {
+        var caster = (ClientGameObject*)casterPtr;
+        var targets = new List<ulong>(header->NumTargets);
+        var displacements = new List<Displacement>();
+        var summary = new System.Text.StringBuilder();
+        for (var i = 0; targetEntityIds != null && i < header->NumTargets; i++)
+        {
+            targets.Add(targetEntityIds[i].ObjectId);
+            if (effects == null)
+            {
+                continue;
+            }
+
+            foreach (var e in effects[i].Effects)
+            {
+                // 効果の種類を調べるためのログ用（0=なし、3=ダメージ は省く）。
+                if (e.Type is not (0 or 3))
+                {
+                    summary.Append($" {targetEntityIds[i].ObjectId:X}:{e.Type}/{e.Value}/{e.Param0},{e.Param1},{e.Param2},{e.Param3},{e.Param4}");
+                }
+
+                if (e.Type is ForcedMovement.EffectKnockback or ForcedMovement.EffectAttract1 or ForcedMovement.EffectAttract2)
+                {
+                    displacements.Add(new Displacement(targetEntityIds[i].ObjectId, e.Type, e.Value));
+                }
+            }
+        }
+
+        // 味方（プレイヤー）が発動した技は判定しない。ただし、デバフが切れたときの吹き飛ばしのように、
+        // 動かしているキャラ本人が発動して本人が飛ばされるものは、本人の向きを基準にかける。
+        var enemyAction = header->ActionType == 1 && !IsFriendly(caster);
+        var selfDisplacement = casterEntityId == this.ghost.AnchorEntityId
+            && displacements.Any(d => d.TargetId == this.ghost.AnchorEntityId);
+        if (!enemyAction && !selfDisplacement)
+        {
+            if (displacements.Count > 0)
+            {
+                this.log.Debug($"[ReplayDrill] Skipped friendly effect {header->ActionId} type={header->ActionType} from {caster->NameString} ({casterEntityId:X}) anchor={this.ghost.AnchorEntityId:X}{summary}");
+            }
+
+            return;
+        }
+
+        var effect = new PendingEffect(
+            casterEntityId,
+            header->ActionId,
+            header->GlobalSequence,
+            caster->NameString,
+            caster->Position,
+            // 発動時の向き（0..65535 → -π..π）。詠唱者の今の向きより正確。
+            (header->RotationInt / 65535f * MathF.Tau) - MathF.PI,
+            targetPos != null ? *targetPos : caster->Position,
+            caster->HitboxRadius,
+            header->AnimationTargetId.ObjectId,
+            targets,
+            displacements)
+        {
+            SelfCast = !enemyAction,
+        };
+
+        lock (this.gate)
+        {
+            this.pending.Add(effect);
+        }
+
+        this.log.Debug($"[ReplayDrill] Effect {header->ActionId} from {caster->NameString} main={header->AnimationTargetId.ObjectId:X} targets={header->NumTargets} anchor={this.ghost.AnchorEntityId:X}{summary}");
     }
 
     /// <summary>フックの中ではなくフレーム処理で判定する（Lumina とオブジェクト表の参照をフック外に出す）。</summary>
@@ -203,6 +233,12 @@ public sealed unsafe class HitJudge : IDisposable
             });
         foreach (var effect in merged)
         {
+            if (effect.SelfCast)
+            {
+                this.ApplySelfDisplacement(effect);
+                continue;
+            }
+
             var result = this.Judge(effect);
             if (result is not null)
             {
@@ -293,6 +329,16 @@ public sealed unsafe class HitJudge : IDisposable
         else
         {
             this.forced.ApplyAttract(apply.Row, source, effect.CasterHitbox);
+        }
+    }
+
+    /// <summary>本人が発動して本人が飛ばされる技（デバフが切れたときの吹き飛ばしなど）。向きは今のキャラの向き。</summary>
+    private void ApplySelfDisplacement(PendingEffect effect)
+    {
+        var own = effect.Displacements.FirstOrDefault(d => d.TargetId == this.ghost.AnchorEntityId && d.Type == ForcedMovement.EffectKnockback);
+        if (own is not null)
+        {
+            this.forced.ApplyKnockback(own.Row, this.ghost.Position, this.ghost.Rotation);
         }
     }
 
@@ -440,7 +486,11 @@ public sealed unsafe class HitJudge : IDisposable
         float CasterHitbox,
         uint MainTargetId,
         List<ulong> Targets,
-        List<Displacement> Displacements);
+        List<Displacement> Displacements)
+    {
+        /// <summary>動かしているキャラ本人が発動した技（判定はせず、本人へのノックバックだけかける）。</summary>
+        public bool SelfCast { get; init; }
+    }
 
     /// <summary>技の効果に含まれていたノックバック・引き寄せ（対象・種類・シートの行）。</summary>
     private sealed record Displacement(ulong TargetId, byte Type, ushort Row);
