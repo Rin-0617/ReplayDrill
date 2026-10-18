@@ -1,0 +1,17 @@
+{
+  "Author": "Rin",
+  "Name": "ReplayDrill",
+  "InternalName": "ReplayDrill",
+  "AssemblyVersion": "0.0.1.0",
+  "MinimumDalamudVersion": "15.0.0.0",
+  "Punchline": "リプレイでギミック回避を練習",
+  "Description": "A Realm Recorded のリプレイ再生中に、自分の分身をWASDで動かしてギミックの回避を練習します。敵の技が発動した瞬間に、分身が範囲内にいたかを判定します。",
+  "RepoUrl": "https://github.com/Rin-0617/ReplayDrill",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "AcceptsFeedback": false
+}

@@ -1,0 +1,31 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>0.0.1.0</Version>
+    <Author>Rin</Author>
+    <Name>ReplayDrill</Name>
+    <MinimumDalamudVersion>15.0.0.0</MinimumDalamudVersion>
+    <Punchline>リプレイでギミック回避を練習</Punchline>
+    <Description>A Realm Recorded のリプレイ再生中に、自分の分身をWASDで動かしてギミックの回避を練習します。敵の技が発動した瞬間に、分身が範囲内にいたかを判定します。</Description>
+    <RepoUrl>https://github.com/Rin-0617/ReplayDrill</RepoUrl>
+    <ApplicableVersion>any</ApplicableVersion>
+    <DalamudApiLevel>15</DalamudApiLevel>
+    <LoadRequiredState>0</LoadRequiredState>
+    <LoadSync>false</LoadSync>
+    <CanUnloadAsync>false</CanUnloadAsync>
+    <LoadPriority>0</LoadPriority>
+    <AcceptsFeedback>false</AcceptsFeedback>
+    <AssemblyName>ReplayDrill</AssemblyName>
+    <RootNamespace>ReplayDrill</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="plugin.json" CopyToOutputDirectory="PreserveNewest" TargetPath="ReplayDrill.json" />
+  </ItemGroup>
+</Project>
