@@ -20,6 +20,9 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>練習中は WASD をゲームに渡さない（ARR のカメラ操作などと競合しないように）。</summary>
     public bool SwallowMoveKeys { get; set; } = true;
 
+    /// <summary>（実験的）出発点にしたリプレイのキャラそのものを、分身の位置へ動かす。</summary>
+    public bool MoveReplayCharacter { get; set; }
+
     /// <summary>分身の印の半径（ヤルム）。見た目だけで、判定は中心の1点で行う。</summary>
     public float GhostRadius { get; set; } = 0.5f;
 

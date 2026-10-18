@@ -96,6 +96,14 @@ public sealed class MainWindow : Window
             this.ghost.Start(anchor);
         }
 
+        var move = this.configuration.MoveReplayCharacter;
+        if (ImGui.Checkbox("リプレイのキャラ自体を動かす（実験的）", ref move))
+        {
+            this.configuration.MoveReplayCharacter = move;
+            this.configuration.Save();
+        }
+
+        ImGui.TextDisabled(this.ghost.Diagnostics);
         ImGui.TextDisabled($"WASDで移動（カメラの向きが前）  再生速度 x{this.ghost.PlaybackSpeed:0.##}{(this.ghost.IsPaused ? "（一時停止中）" : string.Empty)}");
     }
 

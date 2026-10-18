@@ -3,9 +3,11 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
+using ClientGameObject = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
 using GameCameraManager = FFXIVClientStructs.FFXIV.Client.Game.Control.CameraManager;
 
 namespace ReplayDrill.Services;
@@ -23,9 +25,32 @@ public sealed unsafe class GhostController : IDisposable
     private readonly ICondition condition;
     private readonly IKeyState keyState;
     private readonly IObjectTable objectTable;
+    private readonly Hook<ClientGameObject.Delegates.SetPosition>? setPositionHook;
+    private readonly Hook<ClientGameObject.Delegates.SetRotation>? setRotationHook;
 
-    public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IObjectTable objectTable)
+    /// <summary>位置を差し替えている登場人物のアドレス。0 なら差し替えない。</summary>
+    private nint pinnedAddress;
+
+    public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IObjectTable objectTable, IGameInteropProvider interop, IPluginLog log)
     {
+        this.configuration = configuration;
+        this.framework = framework;
+        this.condition = condition;
+        this.keyState = keyState;
+        this.objectTable = objectTable;
+
+        try
+        {
+            this.setPositionHook = interop.HookFromAddress<ClientGameObject.Delegates.SetPosition>(ClientGameObject.Addresses.SetPosition.Value, this.SetPositionDetour);
+            this.setRotationHook = interop.HookFromAddress<ClientGameObject.Delegates.SetRotation>(ClientGameObject.Addresses.SetRotation.Value, this.SetRotationDetour);
+            this.setPositionHook.Enable();
+            this.setRotationHook.Enable();
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "SetPosition/SetRotation hook failed.");
+        }
+
         this.configuration = configuration;
         this.framework = framework;
         this.condition = condition;
@@ -41,6 +66,12 @@ public sealed unsafe class GhostController : IDisposable
 
     /// <summary>分身の向き（最後に動いた方向、ゲームの Rotation と同じ表し方）。</summary>
     public float Rotation { get; private set; }
+
+    /// <summary>分身の出発点にした登場人物。</summary>
+    public ulong AnchorId { get; private set; }
+
+    /// <summary>動かない原因を調べるための、直近フレームの状態。</summary>
+    public string Diagnostics { get; private set; } = string.Empty;
 
     public bool IsReplay => this.condition[ConditionFlag.DutyRecorderPlayback];
 
@@ -68,6 +99,7 @@ public sealed unsafe class GhostController : IDisposable
     /// <summary>指定した登場人物の足元に分身を置いて、練習を始める。</summary>
     public void Start(IGameObject anchor)
     {
+        this.AnchorId = anchor.GameObjectId;
         this.Position = anchor.Position;
         this.Rotation = anchor.Rotation;
         this.Active = true;
@@ -76,11 +108,15 @@ public sealed unsafe class GhostController : IDisposable
     public void Stop()
     {
         this.Active = false;
+        this.pinnedAddress = 0;
     }
 
     public void Dispose()
     {
         this.framework.Update -= this.OnUpdate;
+        this.pinnedAddress = 0;
+        this.setPositionHook?.Dispose();
+        this.setRotationHook?.Dispose();
     }
 
     private void OnUpdate(IFramework framework)
@@ -92,12 +128,30 @@ public sealed unsafe class GhostController : IDisposable
 
         if (!this.IsReplay)
         {
-            this.Active = false;
+            this.Stop();
             return;
         }
 
+        this.Move(framework);
+
+        if (this.configuration.MoveReplayCharacter)
+        {
+            this.PinAnchor();
+        }
+        else
+        {
+            this.pinnedAddress = 0;
+        }
+    }
+
+    private void Move(IFramework framework)
+    {
         // チャットや ImGui の入力欄に文字を打っている間は動かさない。
-        if (ImGui.GetIO().WantTextInput)
+        var typing = ImGui.GetIO().WantTextInput;
+        var cameraOk = TryGetCameraForward(out var forward);
+        this.Diagnostics = $"W:{this.keyState[VirtualKey.W]} A:{this.keyState[VirtualKey.A]} S:{this.keyState[VirtualKey.S]} D:{this.keyState[VirtualKey.D]} "
+            + $"入力中:{typing} 一時停止:{this.IsPaused} カメラ:{cameraOk} 位置:{this.Position.X:0.0},{this.Position.Y:0.0},{this.Position.Z:0.0}";
+        if (typing)
         {
             return;
         }
@@ -131,7 +185,7 @@ public sealed unsafe class GhostController : IDisposable
             }
         }
 
-        if (input == Vector2.Zero || this.IsPaused || !TryGetCameraForward(out var forward))
+        if (input == Vector2.Zero || this.IsPaused || !cameraOk)
         {
             return;
         }
@@ -146,6 +200,46 @@ public sealed unsafe class GhostController : IDisposable
         next.Y = GroundHeight(next) ?? this.Position.Y;
         this.Position = next;
         this.Rotation = MathF.Atan2(direction.X, direction.Y);
+    }
+
+    /// <summary>
+    /// 出発点にした登場人物を、分身の位置へ置き直す（実験的）。リプレイの再生は
+    /// オフラインなので、書き換えても他人には影響しない。リプレイ側がこの人物の位置を
+    /// 書き込んでも、<see cref="SetPositionDetour"/> が分身の位置に差し替える。
+    /// </summary>
+    private void PinAnchor()
+    {
+        var anchor = this.objectTable.FirstOrDefault(o => o.GameObjectId == this.AnchorId);
+        if (anchor is null)
+        {
+            this.pinnedAddress = 0;
+            return;
+        }
+
+        this.pinnedAddress = anchor.Address;
+        var native = (ClientGameObject*)anchor.Address;
+        native->SetPosition(this.Position.X, this.Position.Y, this.Position.Z);
+        native->SetRotation(this.Rotation);
+    }
+
+    private void SetPositionDetour(ClientGameObject* thisPtr, float x, float y, float z)
+    {
+        if (this.pinnedAddress != 0 && (nint)thisPtr == this.pinnedAddress)
+        {
+            (x, y, z) = (this.Position.X, this.Position.Y, this.Position.Z);
+        }
+
+        this.setPositionHook!.Original(thisPtr, x, y, z);
+    }
+
+    private void SetRotationDetour(ClientGameObject* thisPtr, float value)
+    {
+        if (this.pinnedAddress != 0 && (nint)thisPtr == this.pinnedAddress)
+        {
+            value = this.Rotation;
+        }
+
+        this.setRotationHook!.Original(thisPtr, value);
     }
 
     /// <summary>カメラの視線を水平に投影した向き（X, Z）。</summary>

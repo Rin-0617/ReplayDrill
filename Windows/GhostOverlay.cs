@@ -28,7 +28,7 @@ public sealed class GhostOverlay
 
     public void Draw()
     {
-        if (!this.ghost.Active)
+        if (!this.ghost.Active || this.configuration.MoveReplayCharacter)
         {
             return;
         }

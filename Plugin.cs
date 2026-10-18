@@ -41,7 +41,7 @@ public sealed class Plugin : IDalamudPlugin
         var configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         configuration.Initialize(pluginInterface);
 
-        this.ghost = new GhostController(configuration, framework, condition, keyState, objectTable);
+        this.ghost = new GhostController(configuration, framework, condition, keyState, objectTable, interop, log);
         this.judge = new HitJudge(this.ghost, new AoeGeometryResolver(dataManager), objectTable, framework, interop, log);
         this.overlay = new GhostOverlay(configuration, this.ghost, this.judge, gameGui);
         this.mainWindow = new MainWindow(configuration, this.ghost, this.judge);
