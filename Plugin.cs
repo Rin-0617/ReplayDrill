@@ -29,6 +29,7 @@ public sealed class Plugin : IDalamudPlugin
         IFramework framework,
         ICondition condition,
         IKeyState keyState,
+        IGamepadState gamepad,
         IObjectTable objectTable,
         IGameGui gameGui,
         IDataManager dataManager,
@@ -41,7 +42,7 @@ public sealed class Plugin : IDalamudPlugin
         var configuration = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         configuration.Initialize(pluginInterface);
 
-        this.ghost = new GhostController(configuration, framework, condition, keyState, objectTable, interop, log);
+        this.ghost = new GhostController(configuration, framework, condition, keyState, gamepad, objectTable, interop, log);
         this.judge = new HitJudge(this.ghost, new AoeGeometryResolver(dataManager), objectTable, framework, interop, log);
         this.overlay = new GhostOverlay(this.ghost, this.judge, gameGui);
         this.mainWindow = new MainWindow(configuration, this.ghost, this.judge);

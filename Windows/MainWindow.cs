@@ -81,7 +81,7 @@ public sealed class MainWindow : Window
             }
 
             ImGui.SameLine();
-            ImGui.TextDisabled("始めると、選んだキャラをWASDで動かせます。");
+            ImGui.TextDisabled("始めると、選んだキャラを動かせます。");
             return;
         }
 
@@ -97,7 +97,7 @@ public sealed class MainWindow : Window
         }
 
         ImGui.TextDisabled(this.ghost.Diagnostics);
-        ImGui.TextDisabled($"WASDで移動（カメラの向きが前）  再生速度 x{this.ghost.PlaybackSpeed:0.##}{(this.ghost.IsPaused ? "（一時停止中）" : string.Empty)}");
+        ImGui.TextDisabled($"WASD・マウス左右同時押し・左スティックで移動（カメラの向きが前）  再生速度 x{this.ghost.PlaybackSpeed:0.##}{(this.ghost.IsPaused ? "（一時停止中）" : string.Empty)}");
     }
 
     private void DrawResults()

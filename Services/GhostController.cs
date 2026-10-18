@@ -14,17 +14,21 @@ using GameCameraManager = FFXIVClientStructs.FFXIV.Client.Game.Control.CameraMan
 namespace ReplayDrill.Services;
 
 /// <summary>
-/// リプレイ再生中に WASD で動かす「分身」。選んだ登場人物の位置と向きを、
+/// リプレイ再生中にキーボード・マウス・パッドで動かす「分身」。選んだ登場人物の位置と向きを、
 /// リプレイ側の書き込みを差し替えて分身のものに保つ。
 /// </summary>
 public sealed unsafe class GhostController : IDisposable
 {
     private static readonly VirtualKey[] MoveKeys = [VirtualKey.W, VirtualKey.A, VirtualKey.S, VirtualKey.D];
 
+    /// <summary>スティックの遊び。これより小さい傾きは無視する。</summary>
+    private const float StickDeadzone = 0.15f;
+
     private readonly Configuration configuration;
     private readonly IFramework framework;
     private readonly ICondition condition;
     private readonly IKeyState keyState;
+    private readonly IGamepadState gamepad;
     private readonly IObjectTable objectTable;
     private readonly Hook<ClientGameObject.Delegates.SetPosition>? setPositionHook;
     private readonly Hook<ClientGameObject.Delegates.SetRotation>? setRotationHook;
@@ -32,12 +36,13 @@ public sealed unsafe class GhostController : IDisposable
     /// <summary>位置を差し替えている登場人物のアドレス。0 なら差し替えない。</summary>
     private nint pinnedAddress;
 
-    public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IObjectTable objectTable, IGameInteropProvider interop, IPluginLog log)
+    public GhostController(Configuration configuration, IFramework framework, ICondition condition, IKeyState keyState, IGamepadState gamepad, IObjectTable objectTable, IGameInteropProvider interop, IPluginLog log)
     {
         this.configuration = configuration;
         this.framework = framework;
         this.condition = condition;
         this.keyState = keyState;
+        this.gamepad = gamepad;
         this.objectTable = objectTable;
 
         try
@@ -146,14 +151,18 @@ public sealed unsafe class GhostController : IDisposable
         var a = IsDown(VirtualKey.A);
         var s = IsDown(VirtualKey.S);
         var d = IsDown(VirtualKey.D);
-        this.Diagnostics = $"W:{w} A:{a} S:{s} D:{d} 入力中:{typing} 前面:{focused} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
+
+        // FF14 と同じく、マウスの左右ボタンを同時に押している間は前進。窓の上でのクリックは除く。
+        var mouseForward = IsDown(VirtualKey.LBUTTON) && IsDown(VirtualKey.RBUTTON) && !ImGui.GetIO().WantCaptureMouse;
+        var stick = this.ReadLeftStick();
+        this.Diagnostics = $"W:{w} A:{a} S:{s} D:{d} マウス前進:{mouseForward} スティック:{stick.X:0.00},{stick.Y:0.00} 入力中:{typing} 前面:{focused} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
             + $"位置:{this.Position.X:0.0},{this.Position.Y:0.0},{this.Position.Z:0.0}";
         if (typing || !focused)
         {
             return;
         }
 
-        var input = new Vector2((d ? 1f : 0f) - (a ? 1f : 0f), (w ? 1f : 0f) - (s ? 1f : 0f));
+        var input = new Vector2((d ? 1f : 0f) - (a ? 1f : 0f), (w || mouseForward ? 1f : 0f) - (s ? 1f : 0f)) + stick;
 
         if (this.configuration.SwallowMoveKeys)
         {
@@ -171,9 +180,12 @@ public sealed unsafe class GhostController : IDisposable
         // カメラの向きを基準に、前後左右へ動かす。
         var right = new Vector2(-forward.Y, forward.X);
         var direction = Vector2.Normalize((forward * input.Y) + (right * input.X));
+
+        // スティックを少しだけ倒したときは、その分ゆっくり歩く。
+        var strength = MathF.Min(1f, input.Length());
         // 一時停止中も、立ち位置を決められるように等速で動かす。
         var scale = this.configuration.ScaleWithPlaybackSpeed && !this.IsPaused ? this.PlaybackSpeed : 1f;
-        var speed = this.configuration.MoveSpeed * scale;
+        var speed = this.configuration.MoveSpeed * scale * strength;
         var step = direction * speed * (float)framework.UpdateDelta.TotalSeconds;
 
         var next = this.Position + new Vector3(step.X, 0f, step.Y);
@@ -220,6 +232,20 @@ public sealed unsafe class GhostController : IDisposable
         }
 
         this.setRotationHook!.Original(thisPtr, value);
+    }
+
+    /// <summary>左スティックの傾き（-1..1、上が +Y）。遊びの範囲は 0 にする。</summary>
+    private Vector2 ReadLeftStick()
+    {
+        var stick = this.gamepad.LeftStick;
+
+        // 生の値（-99..99）で返る環境にも合わせる。
+        if (stick.Length() > 1.5f)
+        {
+            stick /= 99f;
+        }
+
+        return stick.Length() < StickDeadzone ? Vector2.Zero : stick;
     }
 
     private static bool IsDown(VirtualKey key) => (GetAsyncKeyState((int)key) & 0x8000) != 0;
