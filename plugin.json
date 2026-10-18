@@ -2,7 +2,7 @@
   "Author": "Rin",
   "Name": "ReplayDrill",
   "InternalName": "ReplayDrill",
-  "AssemblyVersion": "0.0.1.0",
+  "AssemblyVersion": "0.1.0.0",
   "MinimumDalamudVersion": "15.0.0.0",
   "Punchline": "リプレイでギミック回避を練習",
   "Description": "A Realm Recorded のリプレイ再生中に、好きなキャラを自分で動かしてギミックの回避を練習します。敵の技が発動した瞬間に、そのキャラが範囲内にいたかを判定します。",
