@@ -32,6 +32,7 @@ public sealed partial class ForcedMovement : IDisposable
     private const float DefaultSpeed = 20f;
 
     private readonly GhostController ghost;
+    private readonly Configuration configuration;
     private readonly IDataManager dataManager;
     private readonly IObjectTable objectTable;
     private readonly IFramework framework;
@@ -40,9 +41,10 @@ public sealed partial class ForcedMovement : IDisposable
     private readonly HashSet<uint> marchStatuses = [];
     private MarchDirection? lastOrder;
 
-    public ForcedMovement(GhostController ghost, IDataManager dataManager, IObjectTable objectTable, IFramework framework, IPluginLog log)
+    public ForcedMovement(GhostController ghost, Configuration configuration, IDataManager dataManager, IObjectTable objectTable, IFramework framework, IPluginLog log)
     {
         this.ghost = ghost;
+        this.configuration = configuration;
         this.dataManager = dataManager;
         this.objectTable = objectTable;
         this.framework = framework;
@@ -78,6 +80,25 @@ public sealed partial class ForcedMovement : IDisposable
 
         this.ghost.Displace(direction, data.Distance, data.Speed > 0 ? data.Speed : DefaultSpeed);
         this.log.Debug($"[ReplayDrill] Knockback row {row}: {data.Distance}y dir={data.Direction}");
+    }
+
+    /// <summary>録画から学習したノックバックがあれば、発生源から外向きにかける。</summary>
+    public bool TryApplyLearned(uint actionId, Vector3 source)
+    {
+        if (!this.configuration.LearnedKnockbacks.TryGetValue(actionId, out var learned) || learned.Distance <= 0f)
+        {
+            return false;
+        }
+
+        var away = Flat(this.ghost.Position - source);
+        if (away.LengthSquared() < 1e-6f)
+        {
+            return false;
+        }
+
+        this.ghost.Displace(Vector2.Normalize(away), learned.Distance, DefaultSpeed);
+        this.log.Debug($"[ReplayDrill] Learned knockback {actionId} {learned.Name}: {learned.Distance}y");
+        return true;
     }
 
     /// <summary>Attract シートの行に従って、キャラを発生源へ引き寄せる。</summary>

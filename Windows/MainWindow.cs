@@ -216,7 +216,43 @@ public sealed class MainWindow : Window
             this.configuration.Save();
         }
 
+        this.DrawLearnedKnockbacks();
         ImGui.TextDisabled($"判定フック: {this.judge.HookStatus}");
+    }
+
+    private void DrawLearnedKnockbacks()
+    {
+        ImGui.Spacing();
+        ImGui.TextUnformatted("録画から学習したノックバック");
+        ImGui.SameLine();
+        ImGui.TextDisabled("(?)");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("技のデータに入っていないノックバック（真空波など）は、録画で当たった人の動きから学習します。\n初めて見た技は学習だけで、次に当たったときから飛ばされます。");
+        }
+
+        if (this.configuration.LearnedKnockbacks.Count == 0)
+        {
+            ImGui.TextDisabled("まだありません。");
+            return;
+        }
+
+        uint? remove = null;
+        foreach (var (actionId, learned) in this.configuration.LearnedKnockbacks.OrderBy(p => p.Value.Name))
+        {
+            ImGui.TextUnformatted($"{learned.Name}  外向きに {learned.Distance:0.#}ヤルム");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"消す##learned{actionId}"))
+            {
+                remove = actionId;
+            }
+        }
+
+        if (remove is { } id)
+        {
+            this.configuration.LearnedKnockbacks.Remove(id);
+            this.configuration.Save();
+        }
     }
 
     private void DrawJobIcon(IBattleChara character, Vector2 size)

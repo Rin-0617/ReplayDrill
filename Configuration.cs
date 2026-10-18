@@ -1,5 +1,6 @@
 using Dalamud.Configuration;
 using Dalamud.Plugin;
+using Newtonsoft.Json;
 
 namespace ReplayDrill;
 
@@ -19,6 +20,13 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>練習中は移動キーをゲームに渡さない（ARR のカメラ操作などと競合しないように）。</summary>
     public bool SwallowMoveKeys { get; set; } = true;
+
+    /// <summary>
+    /// 録画から学習した、技の効果として届かないノックバック（技の ID → 内容）。
+    /// Dalamud の設定読み込みは既定でコレクションに追記するので、置き換えを指定する。
+    /// </summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public Dictionary<uint, LearnedKnockback> LearnedKnockbacks { get; set; } = [];
 
     public void Initialize(IDalamudPluginInterface pluginInterface)
     {
@@ -41,6 +49,7 @@ public sealed class Configuration : IPluginConfiguration
 
     public void Normalize()
     {
+        this.LearnedKnockbacks ??= [];
         this.MoveSpeed = Math.Clamp(this.MoveSpeed, 1f, 20f);
     }
 
@@ -49,4 +58,13 @@ public sealed class Configuration : IPluginConfiguration
         this.Normalize();
         this.pluginInterface?.SavePluginConfig(this);
     }
+}
+
+/// <summary>録画から学習したノックバック。発生源（詠唱者）から外向きに、この距離だけ飛ばす。</summary>
+[Serializable]
+public sealed class LearnedKnockback
+{
+    public string Name { get; set; } = string.Empty;
+
+    public float Distance { get; set; }
 }

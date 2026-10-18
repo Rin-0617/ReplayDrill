@@ -20,6 +20,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("ReplayDrill");
     private readonly GhostController ghost;
     private readonly ForcedMovement forced;
+    private readonly MechanicObserver observer;
     private readonly HitJudge judge;
     private readonly GhostOverlay overlay;
     private readonly MainWindow mainWindow;
@@ -46,8 +47,9 @@ public sealed class Plugin : IDalamudPlugin
         configuration.Initialize(pluginInterface);
 
         this.ghost = new GhostController(configuration, framework, condition, keyState, gamepad, objectTable, clientState, interop, log);
-        this.forced = new ForcedMovement(this.ghost, dataManager, objectTable, framework, log);
-        this.judge = new HitJudge(this.ghost, this.forced, new AoeGeometryResolver(dataManager), objectTable, framework, interop, log);
+        this.forced = new ForcedMovement(this.ghost, configuration, dataManager, objectTable, framework, log);
+        this.observer = new MechanicObserver(this.ghost, configuration, objectTable, framework, log);
+        this.judge = new HitJudge(this.ghost, this.forced, this.observer, new AoeGeometryResolver(dataManager), objectTable, framework, interop, log);
         this.overlay = new GhostOverlay(this.ghost, this.judge, gameGui);
         this.mainWindow = new MainWindow(configuration, this.ghost, this.judge, textures);
         this.windowSystem.AddWindow(this.mainWindow);
@@ -71,6 +73,7 @@ public sealed class Plugin : IDalamudPlugin
         this.windowSystem.RemoveAllWindows();
         this.judge.Dispose();
         this.forced.Dispose();
+        this.observer.Dispose();
         this.ghost.Dispose();
     }
 
