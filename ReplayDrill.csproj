@@ -10,7 +10,7 @@
     <Name>ReplayDrill</Name>
     <MinimumDalamudVersion>15.0.0.0</MinimumDalamudVersion>
     <Punchline>リプレイでギミック回避を練習</Punchline>
-    <Description>A Realm Recorded のリプレイ再生中に、自分の分身をWASDで動かしてギミックの回避を練習します。敵の技が発動した瞬間に、分身が範囲内にいたかを判定します。</Description>
+    <Description>A Realm Recorded のリプレイ再生中に、好きなキャラを自分で動かしてギミックの回避を練習します。敵の技が発動した瞬間に、そのキャラが範囲内にいたかを判定します。</Description>
     <RepoUrl>https://github.com/Rin-0617/ReplayDrill</RepoUrl>
     <ApplicableVersion>any</ApplicableVersion>
     <DalamudApiLevel>15</DalamudApiLevel>

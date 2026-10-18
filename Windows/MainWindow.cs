@@ -97,7 +97,7 @@ public sealed class MainWindow : Window
         }
 
         ImGui.TextDisabled(this.ghost.Diagnostics);
-        ImGui.TextDisabled($"WASD・マウス左右同時押し・左スティックで移動（カメラの向きが前）  再生速度 x{this.ghost.PlaybackSpeed:0.##}{(this.ghost.IsPaused ? "（一時停止中）" : string.Empty)}");
+        ImGui.TextDisabled($"移動キー（ゲームのキー設定）・マウス左右同時押し・左スティックで移動（カメラの向きが前）  再生速度 x{this.ghost.PlaybackSpeed:0.##}{(this.ghost.IsPaused ? "（一時停止中）" : string.Empty)}");
     }
 
     private void DrawResults()
@@ -183,7 +183,7 @@ public sealed class MainWindow : Window
         }
 
         var swallow = this.configuration.SwallowMoveKeys;
-        if (ImGui.Checkbox("練習中はWASDをゲームに渡さない", ref swallow))
+        if (ImGui.Checkbox("練習中は移動キーをゲームに渡さない", ref swallow))
         {
             this.configuration.SwallowMoveKeys = swallow;
             changed = true;

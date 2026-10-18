@@ -17,7 +17,7 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>再生速度に合わせて移動速度も変える。</summary>
     public bool ScaleWithPlaybackSpeed { get; set; } = true;
 
-    /// <summary>練習中は WASD をゲームに渡さない（ARR のカメラ操作などと競合しないように）。</summary>
+    /// <summary>練習中は移動キーをゲームに渡さない（ARR のカメラ操作などと競合しないように）。</summary>
     public bool SwallowMoveKeys { get; set; } = true;
 
     public void Initialize(IDalamudPluginInterface pluginInterface)

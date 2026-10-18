@@ -19,8 +19,6 @@ namespace ReplayDrill.Services;
 /// </summary>
 public sealed unsafe class GhostController : IDisposable
 {
-    private static readonly VirtualKey[] MoveKeys = [VirtualKey.W, VirtualKey.A, VirtualKey.S, VirtualKey.D];
-
     /// <summary>スティックの遊び。これより小さい傾きは無視する。</summary>
     private const float StickDeadzone = 0.15f;
 
@@ -145,17 +143,17 @@ public sealed unsafe class GhostController : IDisposable
         var focused = IsGameFocused();
         var cameraOk = TryGetCameraForward(out var forward);
 
-        // キーは Windows から直接読む。ゲームのキー状態は下で消すので、そちらを読むと
-        // 押しっぱなしが「押していない」に見えてしまう。
-        var w = IsDown(VirtualKey.W);
-        var a = IsDown(VirtualKey.A);
-        var s = IsDown(VirtualKey.S);
-        var d = IsDown(VirtualKey.D);
+        // ゲームのキー設定で移動に割り当てたキーを、Windows から直接読む。ゲームのキー状態は
+        // 下で消すので、そちらを読むと押しっぱなしが「押していない」に見えてしまう。
+        var w = MoveBindings.IsDown(MoveAction.Forward);
+        var a = MoveBindings.IsDown(MoveAction.Left);
+        var s = MoveBindings.IsDown(MoveAction.Back);
+        var d = MoveBindings.IsDown(MoveAction.Right);
 
         // FF14 と同じく、マウスの左右ボタンを同時に押している間は前進。窓の上でのクリックは除く。
         var mouseForward = IsDown(VirtualKey.LBUTTON) && IsDown(VirtualKey.RBUTTON) && !ImGui.GetIO().WantCaptureMouse;
         var stick = this.ReadLeftStick();
-        this.Diagnostics = $"W:{w} A:{a} S:{s} D:{d} マウス前進:{mouseForward} スティック:{stick.X:0.00},{stick.Y:0.00} 入力中:{typing} 前面:{focused} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
+        this.Diagnostics = $"{MoveBindings.Describe()}  前:{w} 後:{s} 左:{a} 右:{d} マウス前進:{mouseForward} スティック:{stick.X:0.00},{stick.Y:0.00} 入力中:{typing} 前面:{focused} 一時停止:{this.IsPaused} カメラ:{cameraOk} "
             + $"位置:{this.Position.X:0.0},{this.Position.Y:0.0},{this.Position.Z:0.0}";
         if (typing || !focused)
         {
@@ -166,7 +164,7 @@ public sealed unsafe class GhostController : IDisposable
 
         if (this.configuration.SwallowMoveKeys)
         {
-            foreach (var key in MoveKeys)
+            foreach (var key in MoveBindings.Keys())
             {
                 this.keyState[key] = false;
             }
