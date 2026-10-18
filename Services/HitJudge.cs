@@ -231,8 +231,12 @@ public sealed unsafe class HitJudge : IDisposable
 
     /// <summary>
     /// 技にノックバック・引き寄せが付いていて、動かしているキャラも食らうべきなら、同じものをかける。
-    /// 範囲で判定できる技は「被弾」か「全体」のとき。判定できない技（単体対象・対象者の円）は、
-    /// 録画でそのキャラ本人が食らっていたとき。
+    /// <list type="bullet">
+    /// <item>範囲で判定できる技は「被弾」か「全体」のとき。起点は詠唱者。</item>
+    /// <item>対象者の円（対象者を中心に周りを吹き飛ばすなど）は、キャラが円の中にいて、対象者本人でないとき。起点は円の中心。</item>
+    /// <item>判定できない技（単体対象）は、録画でそのキャラ本人が食らっていたとき。
+    /// または対象者の周りの人が吹き飛ばされていて、キャラがその範囲の中にいるとき。</item>
+    /// </list>
     /// </summary>
     private void ApplyDisplacement(PendingEffect effect, JudgeResult? result)
     {
@@ -242,12 +246,32 @@ public sealed unsafe class HitJudge : IDisposable
         }
 
         var own = effect.Displacements.FirstOrDefault(d => d.TargetId == this.ghost.AnchorEntityId);
-        var apply = result?.Outcome switch
+        var any = own ?? effect.Displacements[0];
+        var source = effect.CasterPosition;
+        Displacement? apply;
+        switch (result?.Outcome)
         {
-            JudgeOutcome.Hit or JudgeOutcome.Unavoidable => own ?? effect.Displacements[0],
-            JudgeOutcome.Dodged => null,
-            _ => own,
-        };
+            case JudgeOutcome.Hit or JudgeOutcome.Unavoidable:
+                apply = any;
+                break;
+            case JudgeOutcome.Dodged:
+                apply = null;
+                break;
+            case JudgeOutcome.TargetCentered:
+                source = this.TargetCenter(effect);
+                apply = effect.MainTargetId != this.ghost.AnchorEntityId && this.InsideTargetCircle(effect, source) ? any : null;
+                break;
+            default:
+                apply = own;
+                if (apply is null && this.InsideObservedKnockback(effect, out var center))
+                {
+                    source = center;
+                    apply = any;
+                }
+
+                break;
+        }
+
         if (apply is null)
         {
             return;
@@ -255,12 +279,67 @@ public sealed unsafe class HitJudge : IDisposable
 
         if (apply.Type == ForcedMovement.EffectKnockback)
         {
-            this.forced.ApplyKnockback(apply.Row, effect.CasterPosition, effect.Rotation);
+            this.forced.ApplyKnockback(apply.Row, source, effect.Rotation);
         }
         else
         {
-            this.forced.ApplyAttract(apply.Row, effect.CasterPosition, effect.CasterHitbox);
+            this.forced.ApplyAttract(apply.Row, source, effect.CasterHitbox);
         }
+    }
+
+    /// <summary>対象者の円の中心。設置型なら着弾点、そうでなければメインの対象の足元。</summary>
+    private Vector3 TargetCenter(PendingEffect effect)
+    {
+        if (this.resolver.Resolve(effect.ActionId) is { GroundTargeted: false }
+            && this.objectTable.PlayerObjects.FirstOrDefault(p => p.EntityId == effect.MainTargetId) is { } target)
+        {
+            return target.Position;
+        }
+
+        return effect.TargetPosition;
+    }
+
+    /// <summary>
+    /// 範囲の大きさがデータから分からない「対象者の周りを吹き飛ばす」技。録画で吹き飛ばされた人のうち、
+    /// 中心からいちばん遠い人までを範囲とみなし、キャラがその中にいるか。
+    /// </summary>
+    private bool InsideObservedKnockback(PendingEffect effect, out Vector3 center)
+    {
+        center = effect.TargetPosition;
+        if (effect.MainTargetId == 0 || effect.MainTargetId == effect.CasterId || effect.MainTargetId == this.ghost.AnchorEntityId)
+        {
+            return false;
+        }
+
+        if (this.objectTable.PlayerObjects.FirstOrDefault(p => p.EntityId == effect.MainTargetId) is not { } main)
+        {
+            return false;
+        }
+
+        center = main.Position;
+        var knocked = effect.Displacements
+            .Where(d => d.TargetId != effect.MainTargetId && d.TargetId != this.ghost.AnchorEntityId)
+            .Select(d => this.objectTable.PlayerObjects.FirstOrDefault(p => p.EntityId == d.TargetId))
+            .OfType<Dalamud.Game.ClientState.Objects.Types.IGameObject>()
+            .ToList();
+        if (knocked.Count == 0)
+        {
+            return false;
+        }
+
+        var c = center;
+        var radius = knocked.Max(p => Vector2.Distance(new(p.Position.X, p.Position.Z), new(c.X, c.Z))) + 1f;
+        return Vector2.Distance(new(this.ghost.Position.X, this.ghost.Position.Z), new(c.X, c.Z)) <= radius;
+    }
+
+    private bool InsideTargetCircle(PendingEffect effect, Vector3 center)
+    {
+        if (this.resolver.Resolve(effect.ActionId) is not { } geometry)
+        {
+            return false;
+        }
+
+        return geometry.Contains(center, effect.Rotation, 0f, 0f, this.ghost.Position);
     }
 
     /// <summary>録画の中で、生きているプレイヤー全員に当たったか（全体攻撃）。</summary>
