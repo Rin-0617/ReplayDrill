@@ -7,6 +7,7 @@
   "Punchline": "リプレイでギミック回避を練習",
   "Description": "A Realm Recorded のリプレイ再生中に、好きなキャラを自分で動かしてギミックの回避を練習します。敵の技が発動した瞬間に、そのキャラが範囲内にいたかを判定します。",
   "RepoUrl": "https://github.com/Rin-0617/ReplayDrill",
+  "IconUrl": "https://raw.githubusercontent.com/Rin-0617/ReplayDrill/master/images/icon.png",
   "ApplicableVersion": "any",
   "DalamudApiLevel": 15,
   "LoadRequiredState": 0,
