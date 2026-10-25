@@ -45,21 +45,31 @@ public sealed class MainWindow : Window
         }
     }
 
+    private static readonly string[] NavLabels = ["練習", "設定"];
+    private int tab;
+
     private void DrawBody()
     {
-        if (!this.ghost.IsReplay)
+        this.tab = Sidebar.Draw("ReplayDrill", Plugin.VersionText, NavLabels, this.tab, SupportLink.OfuseUrl);
+        if (ImGui.BeginChild("##content", Vector2.Zero, true))
         {
-            ImGui.TextWrapped("A Realm Recorded でリプレイを再生すると、練習を始められます。");
-            ImGui.Separator();
-            this.DrawSettings();
-            return;
+            if (this.tab == 1)
+            {
+                this.DrawSettings();
+            }
+            else if (!this.ghost.IsReplay)
+            {
+                ImGui.TextWrapped("A Realm Recorded でリプレイを再生すると、練習を始められます。");
+            }
+            else
+            {
+                this.DrawPractice();
+                ImGui.Separator();
+                this.DrawResults();
+            }
         }
 
-        this.DrawPractice();
-        ImGui.Separator();
-        this.DrawResults();
-        ImGui.Separator();
-        this.DrawSettings();
+        ImGui.EndChild();
     }
 
     private void DrawPractice()
@@ -197,11 +207,6 @@ public sealed class MainWindow : Window
 
     private void DrawSettings()
     {
-        if (!ImGui.CollapsingHeader("設定"))
-        {
-            return;
-        }
-
         var changed = false;
         var speed = this.configuration.MoveSpeed;
         ImGui.SetNextItemWidth(160);
