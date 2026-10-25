@@ -5,6 +5,7 @@ using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using ReplayDrill.Services;
+using RinUi;
 
 namespace ReplayDrill.Windows;
 
@@ -32,6 +33,19 @@ public sealed class MainWindow : Window
     }
 
     public override void Draw()
+    {
+        Theme.Push();
+        try
+        {
+            this.DrawBody();
+        }
+        finally
+        {
+            Theme.Pop();
+        }
+    }
+
+    private void DrawBody()
     {
         if (!this.ghost.IsReplay)
         {
@@ -111,11 +125,11 @@ public sealed class MainWindow : Window
 
         if (this.ghost.IsMarching)
         {
-            ImGui.TextColored(new Vector4(1f, 0.75f, 0.3f, 1f), "強制移動中（操作できません）");
+            ImGui.TextColored(Theme.Warn, "強制移動中（操作できません）");
         }
         else if (this.ghost.IsControlLocked)
         {
-            ImGui.TextColored(new Vector4(1f, 0.75f, 0.3f, 1f), "ノックバック中");
+            ImGui.TextColored(Theme.Warn, "ノックバック中");
         }
 
         ImGui.TextDisabled(this.ghost.Diagnostics);
@@ -154,10 +168,10 @@ public sealed class MainWindow : Window
             switch (result.Outcome)
             {
                 case JudgeOutcome.Hit:
-                    ImGui.TextColored(new Vector4(1f, 0.35f, 0.35f, 1f), "被弾");
+                    ImGui.TextColored(Theme.Bad, "被弾");
                     break;
                 case JudgeOutcome.Dodged:
-                    ImGui.TextColored(new Vector4(0.45f, 0.9f, 0.45f, 1f), "回避");
+                    ImGui.TextColored(Theme.Good, "回避");
                     break;
                 case JudgeOutcome.Unavoidable:
                     ImGui.TextDisabled("全体");
